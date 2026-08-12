@@ -1,0 +1,7 @@
+# 数据匹配与统计工具 - 运行依赖清单
+# 安装方式：.venv/Scripts/pip install -r requirements.txt
+
+pandas==2.3.3
+openpyxl==3.1.5
+customtkinter==5.2.2
+xlrd==2.0.2        # 用于读取旧版 .xls 格式

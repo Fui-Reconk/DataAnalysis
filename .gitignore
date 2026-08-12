@@ -1,0 +1,44 @@
+# ==== Python ====
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ==== 虚拟环境 ====
+.venv/
+venv/
+env/
+ENV/
+.venv*/
+env.bak/
+
+# ==== IDE / 编辑器 ====
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ==== 运行产物 / 临时文件 ====
+*.log
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# ==== 数据文件（本工具加载/导出的 Excel、CSV 属用户数据，不应入库）====
+docs/
+*.xlsx
+*.xls
+*.xlsm
+*.csv
+!requirements.txt
+# 如需保留示例数据，请取消下一行注释并把样例放进 samples/ 目录
+# !samples/**
