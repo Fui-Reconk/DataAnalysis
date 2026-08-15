@@ -11,9 +11,10 @@ from tkinter import filedialog, messagebox
 
 from app import config
 from app.data_loader import load_excel, scan_columns
+from app.gui.base import AppBase
 
 
-class FileOpsMixin:
+class FileOpsMixin(AppBase):
     """文件操作：添加/移除文件，并在变化后统一刷新界面。"""
 
     def on_add_files(self) -> None:

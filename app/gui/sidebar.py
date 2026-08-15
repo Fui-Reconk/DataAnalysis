@@ -13,9 +13,10 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from app import config
+from app.gui.base import AppBase, NavRowInfo
 
 
-class SidebarMixin:
+class SidebarMixin(AppBase):
     """侧边栏：构建导航项、悬停高亮与展开/折叠切换。"""
 
     def _build_sidebar(self) -> None:
@@ -57,7 +58,7 @@ class SidebarMixin:
             ("🔍", "过滤筛选", 2),
             ("📈", "统计与导出", 3),
         ]
-        self._nav_rows = []  # 侧边栏导航项（元素: 行信息字典）
+        self._nav_rows: list[NavRowInfo] = []  # 侧边栏导航项（元素: 行信息字典）
         for row, (icon, text, index) in enumerate(self.nav_items, start=1):
             self._build_nav_row(self.sidebar, row, icon, text, index, self._nav_rows)
 
@@ -72,8 +73,8 @@ class SidebarMixin:
         self.sidebar.grid_rowconfigure(len(self.nav_items) + 1, weight=1)
 
         # 半透明浮层状态
-        self._overlay: ctk.CTkToplevel | None = None  # 浮层窗口（首次悬停时懒创建）
-        self._overlay_rows = []         # 浮层内导航项（与侧边栏一致）
+        self._overlay: ctk.CTkToplevel | None = None  # 浮层窗口（启动时预创建）
+        self._overlay_rows: list[NavRowInfo] = []     # 浮层内导航项（与侧边栏一致）
         self._overlay_visible = False
         self._overlay_width = self._width_collapsed
         self._overlay_hide_job = None   # 待执行的浮层收起判定任务
@@ -121,8 +122,8 @@ class SidebarMixin:
         text_label.grid(row=0, column=1, sticky="w",
                         padx=(config.NAV_ICON_TEXT_GAP, 4))
 
-        info = {"frame": frame, "icon_label": icon_label, "text_label": text_label,
-                "icon": icon, "text": text, "index": index, "_hover_job": None}
+        info: NavRowInfo = {"frame": frame, "icon_label": icon_label, "text_label": text_label,
+                            "icon": icon, "text": text, "index": index, "_hover_job": None}
         container.append(info)
 
         # 行内任意区域点击切换页面；悬停显示背景高亮（非激活项）

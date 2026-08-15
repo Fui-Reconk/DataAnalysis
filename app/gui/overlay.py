@@ -8,6 +8,7 @@ from __future__ import annotations
 import customtkinter as ctk
 
 from app import config
+from app.gui.base import AppBase
 
 # Windows 上禁用 CTkToplevel 的标题栏颜色操纵（CustomTkinter 官方提供的类级开关）。
 # 该机制在 __init__ 内部会调用 update() 泵事件循环，并 after(5ms) 调度窗口状态
@@ -17,7 +18,7 @@ from app import config
 ctk.CTkToplevel._deactivate_windows_window_header_manipulation = True
 
 
-class OverlayMixin:
+class OverlayMixin(AppBase):
     """半透明浮层：懒创建、淡入淡出动画与移出收起判定。"""
 
     def _bind_nav_hover_events(self, widget) -> None:
@@ -264,7 +265,9 @@ class OverlayMixin:
         """
         self._overlay_anim_token += 1
         token = self._overlay_anim_token
-        start = float(self._overlay.attributes("-alpha"))
+        assert self._overlay is not None
+        overlay = self._overlay  # 局部引用：闭包内类型窄化稳定，且运行期对象不变
+        start = float(overlay.attributes("-alpha"))
         steps = config.SIDEBAR_OVERLAY_ANIM_STEPS
 
         def tick(step: int) -> None:
@@ -275,7 +278,7 @@ class OverlayMixin:
             alpha = start + (target_alpha - start) * step / steps
             if step == steps:
                 alpha = target_alpha
-            self._overlay.attributes("-alpha", max(0.0, min(1.0, alpha)))
+            overlay.attributes("-alpha", max(0.0, min(1.0, alpha)))
             if step < steps:
                 self.root.after(config.SIDEBAR_OVERLAY_ANIM_INTERVAL, lambda: tick(step + 1))
             elif on_complete is not None:

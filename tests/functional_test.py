@@ -13,7 +13,7 @@ import tempfile
 
 # 强制 UTF-8 输出，避免 Windows GBK 控制台编码错误
 try:
-    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
 

@@ -9,11 +9,12 @@ from tkinter import filedialog, messagebox
 
 from app.exporter import default_export_name, export_excel
 from app.filter_engine import apply_query
+from app.gui.base import AppBase
 from app.merge_engine import left_join
 from app.stats import calculate_default_stats
 
 
-class OperationsMixin:
+class OperationsMixin(AppBase):
     """业务操作：执行左连接匹配、应用/重置过滤、导出结果。"""
 
     def on_execute_merge(self) -> None:
