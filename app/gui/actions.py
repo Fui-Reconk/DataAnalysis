@@ -18,13 +18,13 @@ class OperationsMixin(AppBase):
     """业务操作：执行左连接匹配、应用/重置过滤、导出结果。"""
 
     def on_execute_merge(self) -> None:
-        """执行左连接匹配（以第一个文件为基准表）。"""
+        """执行左连接匹配（以第一个数据源为基准表）。"""
         key = self.pages[1].get_key()
         if not key:
             messagebox.showwarning("提示", "请先选择唯一标识项。")
             return
-        if len(self.state.file_paths) < 2:
-            messagebox.showwarning("提示", "至少需要添加两个表格才能执行匹配。")
+        if len(self.state.sources) < 2:
+            messagebox.showwarning("提示", "至少需要添加两个工作表才能执行匹配。")
             return
 
         self.state.key_column = key
@@ -33,7 +33,7 @@ class OperationsMixin(AppBase):
         self.set_status("正在执行左连接匹配，数据量较大时请耐心等待…")
         try:
             try:
-                merged = left_join(self.state.dataframes, self.state.file_paths, key)
+                merged = left_join(self.state.dataframes, self.state.sources, key)
             except (ValueError, KeyError) as exc:
                 messagebox.showerror("匹配失败", str(exc))
                 return
@@ -43,10 +43,10 @@ class OperationsMixin(AppBase):
             self.stop_progress()
 
         rows, cols = merged.shape
-        base_rows = len(self.state.dataframes[self.state.file_paths[0]])
+        base_rows = len(self.state.dataframes[self.state.sources[0]])
         self.pages[1].show_info(
             f"✔ 匹配完成：基准表 {base_rows} 行，合并后 {rows} 行 × {cols} 列。\n"
-            f"主键「{key}」；重复列名已按文件序号加后缀区分。")
+            f"主键「{key}」；重复列名已按数据源序号加后缀区分。")
         self.pages[2].show_info(f"当前数据：{rows} 行 × {cols} 列（匹配后全量数据）")
         self.set_status("匹配完成，可进行过滤或导出。")
 

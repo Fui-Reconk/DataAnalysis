@@ -68,7 +68,7 @@ def main() -> int:
 
     def run_flow() -> None:
         from app import config
-        from app.data_loader import load_excel
+        from app.data_loader import list_sheets, load_excel
 
         try:
             # 0. 浮层窗口应在启动时预创建（隐藏）——触发时只淡入既有窗口，不新建窗口
@@ -203,10 +203,12 @@ def main() -> int:
             hover_row["frame"]._canvas.event_generate("<Leave>")
             print("[OK] 悬停高亮：非激活导航项显示候选背景色")
 
-            # 1. 程序化注入文件（绕过文件对话框）
+            # 1. 程序化注入文件（绕过文件对话框）；数据源 = (文件路径, 工作表名)
             for p in paths:
-                app.state.dataframes[p] = load_excel(p)
-                app.state.file_paths.append(p)
+                sheet = list_sheets(p)[0]
+                app.state.sources.append((p, sheet))
+                app.state.dataframes[(p, sheet)] = load_excel(p, sheet)
+                app.state.staged_files[p] = list_sheets(p)
             app._rescan_columns()
             app._invalidate_result()
             app.pages[0].refresh()
@@ -256,6 +258,26 @@ def main() -> int:
             app.pages[2].set_query("销售额 > 0")
             app.on_apply_filter()  # 应弹提示而非崩溃
             print("[OK] 未匹配时过滤被正确拦截")
+
+            # 8. 工作表多选对话框：默认全选，确定后按勾选顺序回调
+            from app.sheet_dialog import SheetPickerDialog
+            picked = []
+            dlg = SheetPickerDialog(root, "测试对话框",
+                                    [("s1", "表一"), ("s2", "表二"), ("s3", "表三")],
+                                    on_confirm=lambda keys: picked.append(keys))
+            root.update()
+            dlg._on_ok()
+            root.update()
+            assert picked and picked[0] == ["s1", "s2", "s3"], "默认全选应回调全部选项"
+            dlg2 = SheetPickerDialog(root, "测试对话框",
+                                     [("a", "A"), ("b", "B")],
+                                     on_confirm=lambda keys: picked.append(keys))
+            dlg2._select_none()
+            dlg2._vars["b"].set("on")
+            dlg2._on_ok()
+            root.update()
+            assert picked[1] == ["b"], "取消全选后仅勾选项应被回调"
+            print("[OK] 工作表多选对话框：默认全选 / 勾选回调正确")
 
             print("\n=== GUI 冒烟测试全部通过 ===")
         except Exception as exc:  # 测试失败时输出错误（BLE001 见 .flake8）

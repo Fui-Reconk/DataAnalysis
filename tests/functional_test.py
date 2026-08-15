@@ -55,7 +55,7 @@ def _assert(cond: bool, msg: str) -> None:
 
 def main() -> int:
     # app 包依赖上面的项目根目录路径引导，故延迟到函数内导入
-    from app.data_loader import load_excel, scan_columns
+    from app.data_loader import list_sheets, load_excel, scan_columns
     from app.merge_engine import left_join
     from app.filter_engine import apply_query
     from app.stats import calculate_default_stats
@@ -64,17 +64,20 @@ def main() -> int:
     tmp = tempfile.mkdtemp(prefix="data_matcher_test_")
     print("=== 1. 文件读取与表头扫描 ===")
     paths = _build_sample(tmp)
-    dataframes = {}
+    # 数据源 = (文件路径, 工作表名)
+    sources, dataframes = [], {}
     for p in paths:
-        dataframes[p] = load_excel(p)
+        sheet = list_sheets(p)[0]
+        sources.append((p, sheet))
+        dataframes[(p, sheet)] = load_excel(p, sheet)
     _assert(len(dataframes) == 3, "读取 3 个表格成功")
 
-    union = scan_columns(paths, dataframes)
+    union = scan_columns(sources, dataframes)
     _assert("订单号" in union and "地区" in union and "数量" in union and "成本" in union,
             f"表头并集完整: {union}")
 
     print("=== 2. 左连接匹配 ===")
-    merged = left_join(dataframes, paths, "订单号")
+    merged = left_join(dataframes, sources, "订单号")
     _assert(len(merged) == 4, f"以基准表 4 行为准，合并后 {len(merged)} 行")
     _assert("数量" in merged.columns and "成本" in merged.columns,
             "非主键列合并成功")
@@ -97,10 +100,10 @@ def main() -> int:
         print("  ✓ 字段不存在时正确抛出异常（由 GUI 弹窗提示）")
 
     print("=== 5. 匹配键缺失报错 ===")
-    bad = {p: df.rename(columns={"订单号": "单号"} if "订单号" in df.columns else {})
-           for p, df in dataframes.items()}
+    bad = {(p, s): df.rename(columns={"订单号": "单号"} if "订单号" in df.columns else {})
+           for (p, s), df in dataframes.items()}
     try:
-        left_join(bad, paths, "订单号")
+        left_join(bad, sources, "订单号")
         raise AssertionError("✗ 应当抛错但未抛错")
     except KeyError as e:
         print(f"  ✓ 缺列时正确报错: {e}")
@@ -116,6 +119,26 @@ def main() -> int:
             f"导出包含双 Sheet: {xl.sheet_names}")
     sheet2 = pd.read_excel(out, sheet_name="统计结果")
     _assert(sheet2.iloc[0, 0] == "未定义统计", "统计为空时 Sheet2 写入占位内容")
+
+    print("=== 7. 多工作表支持 ===")
+    multi = os.path.join(tmp, "多表.xlsx")
+    with pd.ExcelWriter(multi, engine="openpyxl") as writer:
+        pd.DataFrame({"订单号": ["A01", "A02", "A03"],
+                      "地区": ["华东", "华北", "华南"]}).to_excel(writer, sheet_name="订单", index=False)
+        pd.DataFrame({"订单号": ["A01", "A02"],
+                      "数量": [10, 5]}).to_excel(writer, sheet_name="明细", index=False)
+    sheets = list_sheets(multi)
+    _assert(sheets == ["订单", "明细"], f"列出文件内全部工作表: {sheets}")
+    _assert(len(load_excel(multi, "订单")) == 3 and len(load_excel(multi, "明细")) == 2,
+            "可按工作表名分别读取")
+    # 同一文件的两个工作表作为两个数据源参与左连接
+    ms_sources = [(multi, "订单"), (multi, "明细")]
+    ms_data = {ms_sources[0]: load_excel(multi, "订单"),
+               ms_sources[1]: load_excel(multi, "明细")}
+    ms_merged = left_join(ms_data, ms_sources, "订单号")
+    _assert(len(ms_merged) == 3, f"同一文件两个工作表左连接后 {len(ms_merged)} 行")
+    _assert(pd.isna(ms_merged[ms_merged["订单号"] == "A03"]["数量"].iloc[0]),
+            "A03 无明细 → NaN（符合左连接语义）")
 
     print("\n=== 全部功能测试通过 ===")
     return 0

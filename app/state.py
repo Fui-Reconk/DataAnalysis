@@ -13,10 +13,15 @@ import pandas as pd
 
 @dataclass
 class AppState:
-    # 已添加文件的完整路径列表（顺序即加载顺序，第一个文件作为匹配基准表）
-    file_paths: list = field(default_factory=list)
-    # 文件路径 -> 已读取的 DataFrame（仅包含读取成功的文件）
+    # 已添加数据源列表（元素为 (文件路径, 工作表名)，顺序即加载顺序，
+    # 第一个数据源作为匹配基准表；同一文件可添加多个工作表）
+    sources: list = field(default_factory=list)
+    # (文件路径, 工作表名) -> 已读取的 DataFrame
     dataframes: dict = field(default_factory=dict)
+    # 暂存池：文件路径 -> 该文件全部工作表名。
+    # 文件只要添加过任意工作表即进入暂存池，之后可随时直接添加其
+    # 其它工作表，无需再次选择文件。
+    staged_files: dict = field(default_factory=dict)
     # 全部表头的列名并集（按首次出现顺序）
     column_union: list = field(default_factory=list)
     # 用户选择的唯一标识项（匹配主键）

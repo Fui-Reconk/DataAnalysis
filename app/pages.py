@@ -17,12 +17,12 @@ if TYPE_CHECKING:
 
 
 class FilePage(ctk.CTkFrame):
-    """文件加载区：添加/移除文件，展示已加载文件列表。"""
+    """文件加载区：添加文件/工作表、从暂存池添加、移除，展示已加载数据源。"""
 
     def __init__(self, master, app: "DataMatcherApp", **kwargs):
         super().__init__(master, **kwargs)
         self.app = app
-        self._selected_paths: set = set()  # 当前选中的文件路径
+        self._selected_sources: set = set()  # 当前选中的数据源（(路径, 工作表)）
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -36,13 +36,15 @@ class FilePage(ctk.CTkFrame):
         btn_frame.grid(row=1, column=0, sticky="ew", padx=20, pady=(0, 10))
         ctk.CTkButton(btn_frame, text="＋ 添加文件", command=self.app.on_add_files,
                       font=config.FONT_BODY, width=120).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_frame, text="添加工作表", command=self.app.on_add_sheets,
+                      font=config.FONT_BODY, width=120).pack(side="left", padx=(0, 10))
         ctk.CTkButton(btn_frame, text="移除选中", command=self.app.on_remove_selected,
-                      font=config.FONT_BODY, width=120, fg_color="gray35",
+                      font=config.FONT_BODY, width=110, fg_color="gray35",
                       hover_color="gray45").pack(side="left", padx=(0, 10))
-        ctk.CTkLabel(btn_frame, text="（点击文件行可选中，第一个文件为匹配基准表）",
+        ctk.CTkLabel(btn_frame, text="（点击行可选中，第一个为匹配基准表；同一文件可添加多个工作表）",
                      font=config.FONT_SMALL, text_color="gray60").pack(side="left", padx=(10, 0))
 
-        # 文件列表（可滚动）
+        # 数据源列表（可滚动）
         self.list_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
         self.list_frame.grid(row=2, column=0, sticky="nsew", padx=20, pady=(0, 10))
         self.list_frame.grid_columnconfigure(0, weight=1)
@@ -51,56 +53,58 @@ class FilePage(ctk.CTkFrame):
 
     # ---- 列表刷新 ----
     def refresh(self) -> None:
-        """根据 AppState 重新渲染文件列表。"""
+        """根据 AppState 重新渲染数据源列表（每行 = 文件 + 工作表）。"""
         for child in self.list_frame.winfo_children():
             child.destroy()
-        self._selected_paths.clear()
+        self._selected_sources.clear()
 
-        paths = self.app.state.file_paths
-        if not paths:
-            ctk.CTkLabel(self.list_frame, text="尚未添加文件", font=config.FONT_BODY,
+        sources = self.app.state.sources
+        if not sources:
+            ctk.CTkLabel(self.list_frame, text="尚未添加工作表", font=config.FONT_BODY,
                          text_color="gray60").grid(row=0, column=0, pady=40)
             return
 
-        for index, path in enumerate(paths):
-            self._create_row(index, path)
+        for index, (path, sheet) in enumerate(sources):
+            self._create_row(index, path, sheet)
 
-    def _create_row(self, index: int, path: str) -> None:
-        """创建单个文件行：可选中文件名 + 路径小字 + 单独移除按钮。"""
+    def _create_row(self, index: int, path: str, sheet: str) -> None:
+        """创建单个数据源行：可选中名称按钮 + 路径小字 + 单独移除按钮。"""
         row = ctk.CTkFrame(self.list_frame, corner_radius=8)
         row.grid(row=index, column=0, sticky="ew", pady=4)
         row.grid_columnconfigure(0, weight=1)
 
-        # 文件名按钮：点击切换选中状态（用于“移除选中”）
+        # 名称按钮：点击切换选中状态（用于“移除选中”）
         name_btn = ctk.CTkButton(
-            row, text=f"{index + 1}. {os.path.basename(path)}", font=config.FONT_BODY,
-            fg_color="transparent", hover_color="gray30", anchor="w")
+            row, text=f"{index + 1}. {os.path.basename(path)} [{sheet}]",
+            font=config.FONT_BODY, fg_color="transparent", hover_color="gray30", anchor="w")
         name_btn.grid(row=0, column=0, sticky="ew", padx=(10, 6), pady=4)
-        # 先创建按钮，再绑定点击命令（闭包捕获 path 与按钮自身）
-        name_btn.configure(command=lambda: self._toggle_select(path, name_btn))
+        # 先创建按钮，再绑定点击命令（闭包捕获 path/sheet 与按钮自身）
+        name_btn.configure(command=lambda: self._toggle_select(path, sheet, name_btn))
 
         # 完整路径小字提示
-        ctk.CTkLabel(row, text=path, font=config.FONT_SMALL, text_color="gray60",
-                     anchor="w").grid(row=1, column=0, sticky="w", padx=(10, 6), pady=(0, 4))
+        ctk.CTkLabel(row, text=f"{path} · 工作表「{sheet}」", font=config.FONT_SMALL,
+                     text_color="gray60", anchor="w").grid(
+            row=1, column=0, sticky="w", padx=(10, 6), pady=(0, 4))
 
         # 单独移除按钮
         ctk.CTkButton(row, text="✕", width=34, fg_color="gray35", hover_color="firebrick3",
-                      command=lambda p=path: self.app.on_remove_file(p)).grid(
+                      command=lambda p=path, s=sheet: self.app.on_remove_source(p, s)).grid(
             row=0, column=1, rowspan=2, padx=(0, 8), pady=4)
 
-    def _toggle_select(self, path: str, btn) -> None:
-        """切换某文件行的选中状态。"""
-        if path in self._selected_paths:
-            self._selected_paths.discard(path)
+    def _toggle_select(self, path: str, sheet: str, btn) -> None:
+        """切换某数据源行的选中状态。"""
+        key = (path, sheet)
+        if key in self._selected_sources:
+            self._selected_sources.discard(key)
             btn.configure(fg_color="transparent", hover_color="gray30")
         else:
-            self._selected_paths.add(path)
+            self._selected_sources.add(key)
             btn.configure(fg_color="gray30", hover_color="gray40")
 
     @property
-    def selected_paths(self) -> list:
-        """当前选中文件的路径列表。"""
-        return list(self._selected_paths)
+    def selected_sources(self) -> list:
+        """当前选中的数据源（(文件路径, 工作表名)）列表。"""
+        return list(self._selected_sources)
 
 
 class MatchPage(ctk.CTkFrame):
