@@ -15,6 +15,7 @@ from app import config
 from app.data_loader import list_sheets, load_excel, scan_columns
 from app.gui.base import AppBase
 from app.sheet_dialog import SheetPickerDialog
+from app.system_utils import open_with_system, show_in_folder
 
 
 class FileOpsMixin(AppBase):
@@ -53,10 +54,10 @@ class FileOpsMixin(AppBase):
             self.set_status("所选文件的工作表均已添加过。")
             return
 
-        # 全部单工作表文件 → 直接添加；存在多工作表文件 → 弹窗勾选
+        # 全部单工作表文件 → 直接添加；存在多工作表文件 → 弹窗勾选（按文件分组）
         multi = any(len(self.state.staged_files[p]) > 1 for p, _ in candidates)
         if multi:
-            options = [(c, f"{os.path.basename(c[0])} [{c[1]}]") for c in candidates]
+            options = [(os.path.basename(p), (p, s), s) for p, s in candidates]
             SheetPickerDialog(self.root, "选择要添加的工作表", options,
                               on_confirm=self._add_sources)
         else:
@@ -75,9 +76,52 @@ class FileOpsMixin(AppBase):
                 "提示", "暂存池中没有可添加的工作表。\n\n"
                 "先通过「添加文件」选择文件，之后即可随时直接添加其其它工作表。")
             return
-        options = [(c, f"{os.path.basename(c[0])} [{c[1]}]") for c in candidates]
+        options = [(os.path.basename(p), (p, s), s) for p, s in candidates]
         SheetPickerDialog(self.root, "添加工作表（暂存池）", options,
                           on_confirm=self._add_sources)
+
+    def on_open_source(self, path: str, sheet: str) -> None:
+        """用系统默认程序（Office / WPS 等）打开数据源所在文件。"""
+        try:
+            open_with_system(path)
+        except Exception as exc:  # 打开失败需提示（BLE001 见 .flake8）
+            messagebox.showerror(
+                "打开失败", f"无法用系统默认程序打开文件：\n{path}\n\n{exc}")
+
+    def on_show_in_folder(self, path: str, sheet: str) -> None:
+        """在系统文件管理器中定位数据源所在文件。"""
+        try:
+            show_in_folder(path)
+        except Exception as exc:  # 定位失败需提示（BLE001 见 .flake8）
+            messagebox.showerror(
+                "定位失败", f"无法在文件管理器中定位文件：\n{path}\n\n{exc}")
+
+    def on_reload_source(self, path: str, sheet: str) -> None:
+        """重新读取该工作表（文件被外部修改后刷新内存数据）。"""
+        src = (path, sheet)
+        if src not in self.state.sources:
+            return
+        try:
+            df = load_excel(path, sheet)
+        except Exception as exc:  # 重读失败需提示（BLE001 见 .flake8）
+            messagebox.showerror(
+                "重新读取失败",
+                f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")
+            return
+        self.state.dataframes[src] = df
+        self._after_files_changed(f"已重载：{os.path.basename(path)} [{sheet}]")
+
+    def on_set_base(self, path: str, sheet: str) -> None:
+        """将指定数据源设为匹配基准表（移到列表首位）。"""
+        src = (path, sheet)
+        if src not in self.state.sources:
+            return
+        if self.state.sources[0] == src:
+            self.set_status("该工作表已是匹配基准表。")
+            return
+        self.state.sources.remove(src)
+        self.state.sources.insert(0, src)
+        self._after_files_changed(f"已设为匹配基准表：{os.path.basename(path)} [{sheet}]")
 
     def _add_sources(self, selected) -> None:
         """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。"""

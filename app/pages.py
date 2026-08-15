@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import os
+import tkinter as tk
 from typing import TYPE_CHECKING
 
 import customtkinter as ctk
@@ -42,7 +43,7 @@ class FilePage(ctk.CTkFrame):
         ctk.CTkButton(btn_frame, text="移除选中", command=self.app.on_remove_selected,
                       font=config.FONT_BODY, width=110, fg_color="gray35",
                       hover_color="gray45").pack(side="left", padx=(0, 10))
-        ctk.CTkLabel(btn_frame, text="（点击行可选中，第一个为匹配基准表；同一文件可添加多个工作表）",
+        ctk.CTkLabel(btn_frame, text="（点击行可选中，第一个为匹配基准表；右键更多操作）",
                      font=config.FONT_SMALL, text_color=config.FILE_ROW_SUBTEXT_COLOR).pack(
             side="left", padx=(10, 0))
 
@@ -97,9 +98,58 @@ class FilePage(ctk.CTkFrame):
                       command=lambda p=path, s=sheet: self.app.on_remove_source(p, s)).grid(
             row=0, column=1, rowspan=2, padx=(0, 8), pady=4)
 
+        # 右键菜单：整行（含名称、路径小字）均可触发
+        for w in (row, name_btn, path_label):
+            w.bind("<Button-3>", lambda e, p=path, s=sheet: self._show_row_menu(e, p, s))
+
         self._row_widgets[(path, sheet)] = {
             "frame": row, "btn": name_btn, "path_label": path_label,
         }
+
+    def _show_row_menu(self, event, path: str, sheet: str) -> None:
+        """行右键菜单：打开/定位、选中管理、设为基准表、重读与删除。"""
+        key = (path, sheet)
+        menu = tk.Menu(self, tearoff=0)
+
+        menu.add_command(label="打开", command=lambda: self.app.on_open_source(path, sheet))
+        menu.add_command(label="在文件夹中显示",
+                         command=lambda: self.app.on_show_in_folder(path, sheet))
+        menu.add_separator()
+
+        # 选中状态复选：显示当前是否已选中
+        selected_var = tk.BooleanVar(value=key in self._selected_sources)
+        menu.add_checkbutton(label="选中", variable=selected_var,
+                             command=lambda: self._toggle_select(path, sheet))
+        menu.add_command(label="全选", command=self._select_all)
+        menu.add_command(label="取消全选", command=self._select_none)
+        menu.add_separator()
+
+        menu.add_command(label="移除选中", command=self.app.on_remove_selected)
+        menu.add_separator()
+
+        menu.add_command(label="设为基准表", command=lambda: self.app.on_set_base(path, sheet))
+        menu.add_command(label="重载工作表",
+                         command=lambda: self.app.on_reload_source(path, sheet))
+        menu.add_separator()
+
+        menu.add_command(label="删除", command=lambda: self.app.on_remove_source(path, sheet))
+
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
+    def _select_all(self) -> None:
+        """全选：选中全部数据源行。"""
+        for key, widgets in self._row_widgets.items():
+            self._selected_sources.add(key)
+            self._apply_row_style(widgets, selected=True)
+
+    def _select_none(self) -> None:
+        """取消全选：清空全部选中。"""
+        for key, widgets in self._row_widgets.items():
+            self._selected_sources.discard(key)
+            self._apply_row_style(widgets, selected=False)
 
     def _toggle_select(self, path: str, sheet: str) -> None:
         """切换某数据源行的选中状态（选中：主题色背景 + 白字，对比明显）。"""

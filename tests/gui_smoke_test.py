@@ -235,6 +235,54 @@ def main() -> int:
                 "取消选中后名称文字应恢复高对比默认色"
             print("[OK] 文件行选中：主题色背景 + 白色文字，取消后恢复默认高对比")
 
+            # 1c. 设为基准表：第二个数据源移到首位，之后恢复
+            second_src = app.state.sources[1]
+            app.on_set_base(*second_src)
+            root.update()
+            assert app.state.sources[0] == second_src, "设为基准表后应移到列表首位"
+            app.on_set_base(*app.state.sources[1])
+            root.update()
+            assert app.state.sources[0] == first_src, "基准表应恢复为第一个数据源"
+            print("[OK] 设为基准表：数据源顺序调整正确")
+
+            # 1d. 行右键菜单绑定：整行（框/名称/路径小字）均注册 Button-3
+            # 注：CTk 组件 bind 为追加语义，查询需走底层 _canvas
+            row_widgets = app.pages[0]._row_widgets[first_src]
+            assert row_widgets["frame"]._canvas.bind("<Button-3>"), "行框应绑定右键菜单"
+            assert row_widgets["btn"]._canvas.bind("<Button-3>"), "名称按钮应绑定右键菜单"
+            assert row_widgets["path_label"]._canvas.bind("<Button-3>"), "路径小字应绑定右键菜单"
+            print("[OK] 行右键菜单：框/名称/路径均已绑定")
+
+            # 1e. 右键菜单功能：全选 / 取消全选 / 重读工作表 / 在文件夹中显示
+            file_page = app.pages[0]
+            file_page._select_all()
+            root.update()
+            assert len(file_page.selected_sources) == len(app.state.sources), "全选应选中全部行"
+            assert all(w["frame"].cget("fg_color") ==
+                       ctk.ThemeManager.theme["CTkButton"]["fg_color"]
+                       for w in file_page._row_widgets.values()), "全选后各行应为主题色"
+            file_page._select_none()
+            root.update()
+            assert not file_page.selected_sources, "取消全选后应无选中"
+            assert all(w["frame"].cget("fg_color") == "transparent"
+                       for w in file_page._row_widgets.values()), "取消全选后各行应恢复透明"
+            print("[OK] 右键菜单：全选 / 取消全选 状态正确")
+
+            # 重读工作表：刷新数据且结果失效
+            app.on_reload_source(*first_src)
+            root.update()
+            assert first_src in app.state.dataframes, "重读后数据应保留"
+            assert app.state.merged_df is None, "重读后旧匹配结果应失效"
+            print("[OK] 右键菜单：重载工作表正常")
+
+            # 在文件夹中显示：Windows 分支 explorer /select 调用（monkeypatch）
+            from app import system_utils
+            spawn_calls = []
+            system_utils.subprocess.Popen = lambda *a, **kw: spawn_calls.append(a)  # type: ignore[misc]
+            app.on_show_in_folder(*first_src)
+            assert spawn_calls and spawn_calls[0][0][0] == "explorer", "应调用 explorer 定位文件"
+            print("[OK] 右键菜单：在文件夹中显示（explorer 定位）")
+
             # 2. 切换 4 个页面（验证侧边栏导航）
             for i in range(4):
                 app._show_page(i)
@@ -279,21 +327,25 @@ def main() -> int:
             app.on_apply_filter()  # 应弹提示而非崩溃
             print("[OK] 未匹配时过滤被正确拦截")
 
-            # 8. 工作表多选对话框：勾选语义（视觉与变量一致）与全选/全不选
+            # 8. 工作表多选对话框：按文件分组层级 + 勾选语义 + 全选/全不选
             from app.sheet_dialog import SheetPickerDialog
             picked = []
             dlg = SheetPickerDialog(root, "测试对话框",
-                                    [("s1", "表一"), ("s2", "表二"), ("s3", "表三")],
+                                    [("文件A", ("f1", "s1"), "Sheet1"),
+                                     ("文件A", ("f1", "s2"), "Sheet2"),
+                                     ("文件B", ("f2", "s3"), "Sheet3")],
                                     on_confirm=lambda keys: picked.append(keys))
             root.update()
+            # 分组层级：两个分组头，且组内选项可勾选
+            assert set(dlg._group_headers) == {"文件A", "文件B"}, "应按文件分组显示层级"
             # 默认全选：变量与视觉勾选状态一致
-            for key in ("s1", "s2", "s3"):
+            for key in (("f1", "s1"), ("f1", "s2"), ("f2", "s3")):
                 assert dlg._vars[key].get() == "on" and dlg._checkboxes[key].get() == "on", \
                     "默认应全部勾选（视觉与变量一致）"
-            # 模拟真实点击：勾选中的 s1 点一下 → 取消勾选
-            dlg._checkboxes["s1"].toggle()
+            # 模拟真实点击：勾选中的选项点一下 → 取消勾选
+            dlg._checkboxes[("f1", "s1")].toggle()
             root.update()
-            assert dlg._vars["s1"].get() == "", "点击勾选中的项应取消勾选"
+            assert dlg._vars[("f1", "s1")].get() == "", "点击勾选中的项应取消勾选"
             # 全不选 / 全选：变量与视觉同步
             dlg._select_none()
             root.update()
@@ -303,13 +355,13 @@ def main() -> int:
             root.update()
             assert all(v.get() == "on" for v in dlg._vars.values()), "全选应全部勾选"
             assert all(cb.get() == "on" for cb in dlg._checkboxes.values()), "全选后视觉应勾选"
-            # 只勾选 s2 后确定 → 回调恰好为 [s2]（不反向）
+            # 只勾选一个后确定 → 回调恰好为该选项（不反向）
             dlg._select_none()
-            dlg._vars["s2"].set("on")
+            dlg._vars[("f2", "s3")].set("on")
             dlg._on_ok()
             root.update()
-            assert picked and picked[0] == ["s2"], "确定应只回调勾选项，不得反向"
-            print("[OK] 工作表多选对话框：勾选/全选/全不选语义正确，无反向选中")
+            assert picked and picked[0] == [("f2", "s3")], "确定应只回调勾选项，不得反向"
+            print("[OK] 工作表多选对话框：按文件分组 + 勾选/全选/全不选语义正确")
 
             print("\n=== GUI 冒烟测试全部通过 ===")
         except Exception as exc:  # 测试失败时输出错误（BLE001 见 .flake8）

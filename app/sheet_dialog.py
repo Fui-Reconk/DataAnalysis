@@ -16,11 +16,16 @@ class SheetPickerDialog(ctk.CTkToplevel):
 
     def __init__(self, master, title: str, options: list, on_confirm,
                  default_checked: bool = True):
-        """options: list[(key, label)]；on_confirm(keys) 在确定后回调。"""
+        """options: list[(group, key, label)]；on_confirm(keys) 在确定后回调。
+
+        group 为分组标题（如文件名），非 None 时在组内选项上方渲染
+        加粗分组头，形成「文件 → 工作表」的层级；None 则平铺不分组。
+        """
         super().__init__(master)
         self._on_confirm = on_confirm
         self._vars: dict = {}
         self._checkboxes: dict = {}
+        self._group_headers: dict = {}  # group -> 分组标题控件（测试用）
 
         self.title(title)
         self.resizable(False, False)
@@ -39,7 +44,7 @@ class SheetPickerDialog(ctk.CTkToplevel):
 
         # 提示 + 选项列表（可滚动）
         hint = ctk.CTkLabel(self, text="勾选要添加的工作表：", font=config.FONT_SMALL,
-                            text_color="gray60", anchor="w")
+                            text_color=config.FILE_ROW_SUBTEXT_COLOR, anchor="w")
         hint.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
 
         scroll = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -47,17 +52,30 @@ class SheetPickerDialog(ctk.CTkToplevel):
         self.grid_rowconfigure(1, weight=1)
         self.grid_columnconfigure(0, weight=1)
 
-        for key, label in options:
-            # 变量与勾选框的 on/off 语义必须一致（onvalue/offvalue）：
-            # 否则视觉勾选状态与变量值脱节，会出现"点击选中却被反选"、
-            # "全选/全不选无反应"等问题
-            var = ctk.StringVar(value="on" if default_checked else "")
-            self._vars[key] = var
-            checkbox = ctk.CTkCheckBox(scroll, text=label, variable=var,
-                                       onvalue="on", offvalue="",
-                                       font=config.FONT_BODY)
-            checkbox.pack(fill="x", padx=8, pady=3)
-            self._checkboxes[key] = checkbox
+        # 分组渲染：先按 group 排序去重，组头加粗，选项缩进显示
+        group_font = ctk.CTkFont(family=config.FONT_BODY[0],
+                                 size=config.FONT_BODY[1], weight="bold")
+        groups: list = []
+        for group, _key, _label in options:
+            if group not in groups:
+                groups.append(group)
+        for group in groups:
+            if group is not None:
+                header = ctk.CTkLabel(scroll, text=group, font=group_font,
+                                      text_color=config.FILE_ROW_TEXT_COLOR, anchor="w")
+                header.pack(fill="x", padx=6, pady=(10, 2))
+                self._group_headers[group] = header
+            for key, label in ((k, l) for g, k, l in options if g == group):
+                # 变量与勾选框的 on/off 语义必须一致（onvalue/offvalue）：
+                # 否则视觉勾选状态与变量值脱节，会出现"点击选中却被反选"、
+                # "全选/全不选无反应"等问题
+                var = ctk.StringVar(value="on" if default_checked else "")
+                self._vars[key] = var
+                checkbox = ctk.CTkCheckBox(scroll, text=label, variable=var,
+                                           onvalue="on", offvalue="",
+                                           font=config.FONT_BODY)
+                checkbox.pack(fill="x", padx=18, pady=3)
+                self._checkboxes[key] = checkbox
 
         # 底部操作栏：全选 / 全不选 / 取消 / 确定
         bar = ctk.CTkFrame(self, fg_color="transparent")
