@@ -81,11 +81,10 @@ class FileOpsMixin(AppBase):
         SheetPickerDialog(self.root, "添加工作表（暂存池）", options,
                           on_confirm=self._add_sources)
 
-    def on_preview_source(self, path: str, sheet: str, modal: bool = True,
-                          shift: tuple = (0, 0)):
+    def on_preview_source(self, path: str, sheet: str, shift: tuple = (0, 0)):
         """预览工作表前几行数据（直接使用已加载的内存数据）。
 
-        modal=False 用于多弹窗级联场景；shift 为级联偏移。
+        预览为非模态：可同时打开多个、主窗口保持可操作；shift 为级联偏移。
         """
         df = self.state.dataframes.get((path, sheet))
         if df is None:
@@ -101,7 +100,7 @@ class FileOpsMixin(AppBase):
         # 显示缩放倍率：与浮层同源（侧边栏物理/逻辑宽度比），已验证可靠
         scale = float(self.sidebar._apply_widget_scaling(1.0))
         return PreviewDialog(self.root, f"预览：{os.path.basename(path)} [{sheet}]",
-                             columns, rows, info, modal=modal, shift=shift, scale=scale)
+                             columns, rows, info, shift=shift, scale=scale)
 
     def on_open_source(self, path: str, sheet: str) -> None:
         """用系统默认程序（Office / WPS 等）打开数据源所在文件。"""
@@ -179,11 +178,11 @@ class FileOpsMixin(AppBase):
         if added_sources:
             self._after_files_changed(
                 f"已添加 {len(added_sources)} 个工作表，当前共 {len(self.state.sources)} 个。")
-            # 导入后按配置自动弹出预览（数量可配，首个模态，其余级联非模态）
+            # 导入后按配置自动弹出预览（数量可配，全部非模态、级联排列）
             if config.PREVIEW_AUTO_SHOW:
                 count = max(1, min(config.PREVIEW_AUTO_SHOW_COUNT, len(added_sources)))
                 for i, src in enumerate(added_sources[:count]):
-                    self.on_preview_source(*src, modal=(i == 0), shift=(i * 24, i * 24))
+                    self.on_preview_source(*src, shift=(i * 24, i * 24))
         else:
             self.set_status(config.STATUS_READY)
 

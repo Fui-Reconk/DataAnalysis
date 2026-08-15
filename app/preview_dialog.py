@@ -43,13 +43,14 @@ def _text_width(text: str) -> int:
 class PreviewDialog(ctk.CTkToplevel):
     """数据预览弹窗：columns 为表头，rows 为数据行（不含表头）。
 
-    modal=False 时非模态（多表自动预览的后续弹窗）；shift 为相对
-    居中的偏移量（级联排列，避免多弹窗完全重叠）；scale 为显示
-    缩放倍率（由调用方从侧边栏读取，1.25 = 125% 显示）。
+    非模态设计（不使用 grab_set）：多个预览可同时打开、各自独立
+    关闭/置前，主窗口始终可操作；shift 为相对居中的级联偏移（多
+    预览不重叠）；scale 为显示缩放倍率（由调用方从侧边栏读取，
+    1.25 = 125% 显示）。
     """
 
     def __init__(self, master, title: str, columns: list, rows: list,
-                 info_text: str = "", modal: bool = True, shift: tuple = (0, 0),
+                 info_text: str = "", shift: tuple = (0, 0),
                  scale: float = 1.0):
         super().__init__(master)
         self.columns = list(columns)
@@ -58,10 +59,14 @@ class PreviewDialog(ctk.CTkToplevel):
 
         self.title(title)
         self.resizable(False, False)
-        self.transient(master)
-        if modal:
-            self.grab_set()  # 模态
-        self.attributes("-topmost", True)
+        # 普通无主窗口（不设 transient/-toolwindow/-topmost）：
+        #  - transient/toolwindow 在 Windows 上无法被激活，focus_force
+        #    失效 → 预览刚出现就被主窗口抢回前台（表现为"出现后消失"），
+        #    且 toolwindow 标题栏是老式小叉；
+        #  - 普通窗口可正常置前：打开时 lift+focus_force 到最前，点主窗口
+        #    时主窗口置前、预览躲到后面，点预览时预览置前；
+        #  - 代价：预览会出现在任务栏/Alt-Tab（可用任务栏管理多个预览）。
+        # 非模态：不 grab_set，避免多预览互相劫持点击、主窗口被锁死
 
         # 居中于主窗口（可带级联偏移）；用 Tk 原生 wm geometry 直接设
         # 物理像素，绕开 CTkToplevel.geometry 对 W/H 的双重缩放
@@ -140,6 +145,26 @@ class PreviewDialog(ctk.CTkToplevel):
             new_y = max(my + (mh - target_phys) // 2 + shift[1], 0)
             self.wm_geometry(f"{w_phys}x{max(target_phys, 160)}+{x}+{new_y}")
             self.update_idletasks()
+
+        # 置前并聚焦 + 瞬时置顶保险：Windows 上前台锁定或父窗口销毁时的
+        # 激活竞争会盖掉 focus_force（表现为预览"出现即跑到后面"），短暂
+        # 置顶可强制越过竞争；释放后恢复普通 z-order，点主窗口仍可把
+        # 预览顶到后面
+        self.lift()
+        self.focus_force()
+        self.after(30, self._ensure_on_top)
+
+    def _ensure_on_top(self) -> None:
+        """瞬时置顶 150ms 强制预览越过前台竞争，随后释放恢复普通层级。"""
+        if not self.winfo_exists():
+            return
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(150, self._release_topmost)
+
+    def _release_topmost(self) -> None:
+        if self.winfo_exists():
+            self.attributes("-topmost", False)
 
     def _apply_tree_style(self, tree: ttk.Treeview, row_h: int) -> None:
         """按当前外观模式配置 Treeview 配色；row_h 为物理行高。"""

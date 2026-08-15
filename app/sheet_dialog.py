@@ -31,7 +31,8 @@ class SheetPickerDialog(ctk.CTkToplevel):
         self.resizable(False, False)
         self.transient(master)
         self.grab_set()  # 模态：阻止操作主窗口
-        self.attributes("-topmost", True)
+        # 不设 -topmost：模态 grab 已保证交互，置顶反而会让对话框
+        # 永远压在其他应用上层；打开时 lift 一次置于主窗口之上即可
 
         # 居中于主窗口
         master.update_idletasks()
@@ -91,6 +92,8 @@ class SheetPickerDialog(ctk.CTkToplevel):
                       command=self._on_cancel).grid(row=0, column=2, padx=4)
         ctk.CTkButton(bar, text="确定", width=72, font=config.FONT_BODY,
                       command=self._on_ok).grid(row=0, column=4, padx=4)
+
+        self.lift()  # 打开时置于主窗口之上（不设置顶，避免压住其它应用）
 
     # ---- 交互 ----
     def _select_all(self) -> None:

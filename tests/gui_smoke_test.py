@@ -297,9 +297,20 @@ def main() -> int:
                             preview._table_frame.winfo_reqheight()) <= 2,
                 timeout_ms=1000)
             assert ok, "表格区不应有多余空白"
+            # 预览非模态：不劫持鼠标/键盘，主窗口与其它窗口可操作
+            assert preview.grab_current() is None, "预览不应 grab（模态）"
+            # 多个预览可并存：再开一个，两个都可见、无 grab 互抢
+            preview2 = app.on_preview_source(*app.state.sources[1])
+            root.update()
+            assert preview.winfo_viewable() and preview2.winfo_viewable(), "两个预览应同时可见"
+            assert preview2.grab_current() is None, "第二个预览也不应 grab"
+            preview2.close()
+            root.update()
+            assert not preview2.winfo_exists(), "第二个预览应可独立关闭（已销毁）"
             preview.close()
             root.update()
-            print("[OK] 预览：表格展示工作表前几行数据（无索引列、无空白带）")
+            assert not preview.winfo_exists(), "第一个预览应可独立关闭（已销毁）"
+            print("[OK] 预览：内容正确、无空白带、非模态可多开并存")
 
             # 2. 切换 4 个页面（验证侧边栏导航）
             for i in range(4):
