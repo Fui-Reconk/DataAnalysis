@@ -1,62 +1,100 @@
-"""全局配置：主题、字号、窗口尺寸与提示文案。
+"""全局配置加载：从项目根目录的 config.cfg 读取全部可调参数。
 
-集中管理 UI 常量，便于统一调整外观与文案。
+config.py 仅保留加载与解析逻辑，所有可调参数集中在项目根目录的
+config.cfg（INI 格式，支持 # 注释）中维护，改配置无需动代码；
+config.cfg 缺失时全部回退到代码内置默认值，应用仍可正常运行。
 """
 from __future__ import annotations
 
+import configparser
+from pathlib import Path
+
+_CFG_PATH = Path(__file__).resolve().parent.parent / "config.cfg"
+
+_cfg = configparser.ConfigParser()
+if _CFG_PATH.exists():
+    _cfg.read(_CFG_PATH, encoding="utf-8")
+
+
+def _pair(section: str, key: str, fallback: tuple) -> tuple:
+    """读取逗号分隔的二元组（如浅色/深色颜色对）。"""
+    raw = _cfg.get(section, key, fallback=",".join(str(x) for x in fallback))
+    return tuple(p.strip() for p in raw.split(","))
+
+
+def _font(section: str, key: str, fallback: tuple) -> tuple:
+    """读取字体配置：family,size[,weight]。"""
+    raw = _cfg.get(section, key, fallback=",".join(str(x) for x in fallback))
+    parts = [p.strip() for p in raw.split(",")]
+    size = int(parts[1])
+    if len(parts) >= 3:
+        return (parts[0], size, parts[2])
+    return (parts[0], size)
+
+
+def _file_types() -> list:
+    """读取文件对话框可选类型（label:pattern，逗号分隔）。"""
+    raw = _cfg.get("files", "excel_types",
+                   fallback="Excel 文件:*.xlsx *.xls,所有文件:*.*")
+    result = []
+    for item in raw.split(","):
+        item = item.strip()
+        if ":" in item:
+            label, pattern = item.split(":", 1)
+            result.append((label.strip(), pattern.strip()))
+    return result
+
+
 # ---------- CustomTkinter 外观 ----------
-# 外观模式："system"（跟随系统）/ "light" / "dark"
-APPEARANCE_MODE = "system"
-# 主题色："blue" / "green" / "dark-blue"
-COLOR_THEME = "blue"
+APPEARANCE_MODE = _cfg.get("app", "appearance_mode", fallback="system")
+COLOR_THEME = _cfg.get("app", "color_theme", fallback="blue")
 
 # ---------- 窗口尺寸 ----------
-WINDOW_WIDTH = 1000
-WINDOW_HEIGHT = 680
-WINDOW_MIN_WIDTH = 900
-WINDOW_MIN_HEIGHT = 600
+WINDOW_WIDTH = _cfg.getint("app", "window_width", fallback=1000)
+WINDOW_HEIGHT = _cfg.getint("app", "window_height", fallback=680)
+WINDOW_MIN_WIDTH = _cfg.getint("app", "window_min_width", fallback=900)
+WINDOW_MIN_HEIGHT = _cfg.getint("app", "window_min_height", fallback=600)
 
 # ---------- 侧边栏 ----------
-SIDEBAR_WIDTH = 210                # 展开宽度（默认状态 / 半透明浮层展开宽度）
-SIDEBAR_COLLAPSED_WIDTH = 56       # 折叠宽度（点击开合按钮后的窄图标栏宽度）
-SIDEBAR_HEADER_HEIGHT = 150        # 顶部标题区固定占位高度（折叠时内容隐藏但占位保留，导航图标Y轴不变）
-NAV_ROW_HEIGHT = 44                # 每个导航项占位高度
-NAV_ROW_PADY = 4                   # 导航项上下间距
-NAV_ICON_TEXT_GAP = 10             # 展开时图标与文字的间距
-# 底部开合按钮（点击切换，无动画直接呈现结果）
-SIDEBAR_TOGGLE_EXPANDED = "◀"      # 展开状态：箭头朝左，置于侧边栏最右侧
-SIDEBAR_TOGGLE_COLLAPSED = "▶"     # 折叠状态：箭头朝右
-# 半透明浮层：折叠状态下悬停侧边栏，快速展开并覆盖主界面（不移动主界面内容）
-SIDEBAR_OVERLAY_ALPHA = 0.9        # 浮层窗口透明度（0~1，越小越透明）
-SIDEBAR_OVERLAY_ANIM_STEPS = 8     # 浮层展开/收起动画步数（加快帧率）
-SIDEBAR_OVERLAY_ANIM_INTERVAL = 12  # 浮层淡入/淡出每步间隔（毫秒，加快帧率）
-# 导航文字 / 背景对比度（(浅色模式, 深色模式) 二元组，CTk 主题色语法）
-# 默认（未悬停）状态下即保证高对比可读，不依赖鼠标移入
-NAV_TEXT_COLOR = ("#222831", "#E8EAF0")    # 未激活项文字
-NAV_HOVER_COLOR = ("#A9B4C2", "#3E4754")   # 未激活项悬停背景（明显，具备良好标识作用）
-NAV_ACTIVE_TEXT_COLOR = "#FFFFFF"          # 激活项文字（主题色底上用白色）
-NAV_SUBTITLE_COLOR = ("#5A6472", "#9AA4B2")  # 侧边栏副标题
+SIDEBAR_WIDTH = _cfg.getint("sidebar", "width", fallback=210)
+SIDEBAR_COLLAPSED_WIDTH = _cfg.getint("sidebar", "collapsed_width", fallback=56)
+SIDEBAR_HEADER_HEIGHT = _cfg.getint("sidebar", "header_height", fallback=150)
+NAV_ROW_HEIGHT = _cfg.getint("sidebar", "nav_row_height", fallback=44)
+NAV_ROW_PADY = _cfg.getint("sidebar", "nav_row_pady", fallback=4)
+NAV_ICON_TEXT_GAP = _cfg.getint("sidebar", "nav_icon_text_gap", fallback=10)
+SIDEBAR_TOGGLE_EXPANDED = _cfg.get("sidebar", "toggle_expanded", fallback="◀")
+SIDEBAR_TOGGLE_COLLAPSED = _cfg.get("sidebar", "toggle_collapsed", fallback="▶")
+SIDEBAR_OVERLAY_ALPHA = _cfg.getfloat("sidebar", "overlay_alpha", fallback=0.9)
+SIDEBAR_OVERLAY_ANIM_STEPS = _cfg.getint("sidebar", "overlay_anim_steps", fallback=8)
+SIDEBAR_OVERLAY_ANIM_INTERVAL = _cfg.getint("sidebar", "overlay_anim_interval", fallback=12)
+NAV_TEXT_COLOR = _pair("nav", "text_color", ("#222831", "#E8EAF0"))
+NAV_HOVER_COLOR = _pair("nav", "hover_color", ("#A9B4C2", "#3E4754"))
+NAV_ACTIVE_TEXT_COLOR = _cfg.get("nav", "active_text_color", fallback="#FFFFFF")
+NAV_SUBTITLE_COLOR = _pair("nav", "subtitle_color", ("#5A6472", "#9AA4B2"))
 
 # ---------- 字体 ----------
-# Windows 使用微软雅黑，macOS/Linux 回退到系统中文字体
-FONT_TITLE = ("Microsoft YaHei UI", 18, "bold")
-FONT_NAV = ("Microsoft YaHei UI", 13)
-FONT_BODY = ("Microsoft YaHei UI", 12)
-FONT_SMALL = ("Microsoft YaHei UI", 11)
+FONT_TITLE = _font("font", "title", ("Microsoft YaHei UI", 18, "bold"))
+FONT_NAV = _font("font", "nav", ("Microsoft YaHei UI", 13))
+FONT_BODY = _font("font", "body", ("Microsoft YaHei UI", 12))
+FONT_SMALL = _font("font", "small", ("Microsoft YaHei UI", 11))
 
 # ---------- 状态栏文案 ----------
-STATUS_READY = "就绪"
-STATUS_BUSY = "处理中，请稍候…"
+STATUS_READY = _cfg.get("status", "ready", fallback="就绪")
+STATUS_BUSY = _cfg.get("status", "busy", fallback="处理中，请稍候…")
 
 # ---------- 统计占位文案 ----------
-STATS_PLACEHOLDER_TEXT = "默认统计项：预留（请在代码 calculate_default_stats 中自定义）"
+STATS_PLACEHOLDER_TEXT = _cfg.get(
+    "stats", "placeholder_text",
+    fallback="默认统计项：预留（请在代码 calculate_default_stats 中自定义）")
 
 # ---------- 应用信息 ----------
-APP_TITLE = "数据匹配与统计工具"
-APP_SUBTITLE = "Excel 多表左连接匹配 · 动态过滤 · 统计导出"
+APP_TITLE = _cfg.get("app", "title", fallback="数据匹配与统计工具")
+APP_SUBTITLE = _cfg.get("app", "subtitle",
+                        fallback="Excel 多表左连接匹配 · 动态过滤 · 统计导出")
 
 # ---------- 文件类型 ----------
-EXCEL_FILE_TYPES = [
-    ("Excel 文件", "*.xlsx *.xls"),
-    ("所有文件", "*.*"),
-]
+EXCEL_FILE_TYPES = _file_types()
+
+# ---------- 对话框 ----------
+SHEET_PICKER_WIDTH = _cfg.getint("dialog", "sheet_picker_width", fallback=400)
+SHEET_PICKER_HEIGHT = _cfg.getint("dialog", "sheet_picker_height", fallback=460)
