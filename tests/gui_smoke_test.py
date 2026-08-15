@@ -235,15 +235,24 @@ def main() -> int:
                 "取消选中后名称文字应恢复高对比默认色"
             print("[OK] 文件行选中：主题色背景 + 白色文字，取消后恢复默认高对比")
 
-            # 1c. 设为基准表：第二个数据源移到首位，之后恢复
+            # 1c. 设为基准表：单选生效（左键勾选），多选无效
             second_src = app.state.sources[1]
-            app.on_set_base(*second_src)
+            file_page = app.pages[0]
+            file_page._select_none()
+            file_page._toggle_select(*second_src)
+            app.on_set_base()
             root.update()
-            assert app.state.sources[0] == second_src, "设为基准表后应移到列表首位"
-            app.on_set_base(*app.state.sources[1])
+            assert app.state.sources[0] == second_src, "单选设为基准表应移到首位"
+            file_page._select_all()
+            app.on_set_base()
+            root.update()
+            assert app.state.sources[0] == second_src, "多选时不应设置基准表"
+            file_page._select_none()
+            file_page._toggle_select(*first_src)
+            app.on_set_base()
             root.update()
             assert app.state.sources[0] == first_src, "基准表应恢复为第一个数据源"
-            print("[OK] 设为基准表：数据源顺序调整正确")
+            print("[OK] 设为基准表：单选生效、多选无效")
 
             # 1d. 行右键菜单绑定：整行（框/名称/路径小字）均注册 Button-3
             # 注：CTk 组件 bind 为追加语义，查询需走底层 _canvas
@@ -253,7 +262,7 @@ def main() -> int:
             assert row_widgets["path_label"]._canvas.bind("<Button-3>"), "路径小字应绑定右键菜单"
             print("[OK] 行右键菜单：框/名称/路径均已绑定")
 
-            # 1e. 右键菜单功能：全选 / 取消全选 / 重读工作表 / 在文件夹中显示
+            # 1e. 右键菜单功能：全选 / 取消全选 / 右键自动选中 / 批量操作 / 二次确认
             file_page = app.pages[0]
             file_page._select_all()
             root.update()
@@ -268,20 +277,127 @@ def main() -> int:
                        for w in file_page._row_widgets.values()), "取消全选后各行应恢复透明"
             print("[OK] 右键菜单：全选 / 取消全选 状态正确")
 
-            # 重读工作表：刷新数据且结果失效
-            app.on_reload_source(*first_src)
+            # 右键目标策略：未选中行右键 → 独立操作；已选中行右键 → 批量
+            file_page._select_none()
+            assert file_page._menu_targets(*first_src) == [first_src], \
+                "未选中行右键应为独立操作（仅该行）"
+            file_page._toggle_select(*first_src)
+            file_page._toggle_select(*second_src)
+            targets = file_page._menu_targets(*first_src)
+            assert set(targets) == {first_src, second_src}, "已选中行右键应为批量操作"
+            # 全选开关：全部已选时再点 → 取消全选
+            file_page._toggle_select_all()
             root.update()
-            assert first_src in app.state.dataframes, "重读后数据应保留"
-            assert app.state.merged_df is None, "重读后旧匹配结果应失效"
-            print("[OK] 右键菜单：重载工作表正常")
+            assert not file_page.selected_sources, "全选开关再点应取消全选"
+            file_page._toggle_select_all()
+            root.update()
+            assert len(file_page.selected_sources) == len(app.state.sources), \
+                "全选开关未全选时应全选"
+            file_page._select_none()
+            print("[OK] 右键目标：未选中独立 / 已选中批量；全选为开关式")
 
-            # 在文件夹中显示：Windows 分支 explorer /select 调用（monkeypatch）
+            # 无选中右键：菜单打开期间临时选中，关闭后自动取消
+            file_page._select_none()
+            assert file_page._begin_menu_selection(*first_src) is True, \
+                "无选中时右键应临时选中该行"
+            assert file_page.selected_sources == [first_src]
+            file_page._end_menu_selection(*first_src, True)
+            assert not file_page.selected_sources, "菜单关闭后应自动取消临时选中"
+            # 已有选中时右键不临时选中、不改变选区
+            file_page._toggle_select(*first_src)
+            assert file_page._begin_menu_selection(*second_src) is False, \
+                "有选中时不应临时选中"
+            assert file_page.selected_sources == [first_src]
+            file_page._end_menu_selection(*second_src, False)
+            file_page._select_none()
+            print("[OK] 无选中临时选中/自动取消")
+
+            # 原生右键菜单：结构（计数/设基准禁用/勾选变量存活）
+            menu = file_page._build_row_menu(*first_src)
+            labels = []
+            for i in range(menu.index("end") + 1):
+                if menu.type(i) != "separator":
+                    labels.append(menu.entrycget(i, "label"))
+            assert "打开" in labels and "打开（2）" not in labels, "单选不应显示计数"
+            assert "移除" in labels, "应保留移除项"
+            # 勾选变量保持存活（防 GC 导致勾勾消失）
+            for i in range(menu.index("end") + 1):
+                if menu.type(i) == "checkbutton":
+                    var_name = menu.entrycget(i, "variable")
+                    assert var_name and var_name in root.tk.call("info", "globals"), \
+                        f"勾选变量 {var_name} 应存活"
+            # 设为基准表：单选可用
+            set_base_idx = None
+            for i in range(menu.index("end") + 1):
+                if menu.type(i) != "separator" and menu.entrycget(i, "label") == "设为基准表":
+                    set_base_idx = i
+                    break
+            assert set_base_idx is not None
+            assert menu.entrycget(set_base_idx, "state") != "disabled", \
+                "单选时设基准应可用"
+            # 多选：计数显示 + 设基准禁用
+            file_page._toggle_select(*first_src)
+            file_page._toggle_select(*second_src)
+            menu2 = file_page._build_row_menu(*first_src)
+            labels2 = []
+            for i in range(menu2.index("end") + 1):
+                if menu2.type(i) != "separator":
+                    labels2.append(menu2.entrycget(i, "label"))
+            assert "打开（2）" in labels2, "多选应显示计数"
+            set_base_idx2 = None
+            for i in range(menu2.index("end") + 1):
+                if menu2.type(i) != "separator" and menu2.entrycget(i, "label") == "设为基准表":
+                    set_base_idx2 = i
+                    break
+            assert set_base_idx2 is not None
+            assert menu2.entrycget(set_base_idx2, "state") == "disabled", \
+                "多选时设基准应禁用"
+            file_page._select_none()
+            print("[OK] 原生右键菜单：计数/设基准禁用/勾选变量存活")
+
+            # 批量操作：打开（按文件去重）/ 定位（每文件一次）/ 重载（结果失效）
             from app import system_utils
+            file_page._select_none()
+            file_page._toggle_select(*first_src)
+            file_page._toggle_select(*second_src)
+            open_calls = []
+            system_utils.os.startfile = lambda p: open_calls.append(p)  # type: ignore
+            app.on_open_sources()
+            assert set(open_calls) == {first_src[0], second_src[0]}, "批量打开应按文件去重"
+            open_calls.clear()
             spawn_calls = []
             system_utils.subprocess.Popen = lambda *a, **kw: spawn_calls.append(a)  # type: ignore[misc]
-            app.on_show_in_folder(*first_src)
-            assert spawn_calls and spawn_calls[0][0][0] == "explorer", "应调用 explorer 定位文件"
-            print("[OK] 右键菜单：在文件夹中显示（explorer 定位）")
+            app.on_show_sources_in_folder()
+            assert len(spawn_calls) == 2, "批量定位应按文件逐个调用"
+            app.on_reload_sources()
+            root.update()
+            assert first_src in app.state.dataframes and second_src in app.state.dataframes, \
+                "批量重载后数据应保留"
+            assert app.state.merged_df is None, "批量重载后旧结果应失效"
+            print("[OK] 批量操作：打开去重 / 定位 / 重载")
+
+            # 二次确认：超过阈值时 askyesno=False 中止、True 执行（重载刷新清空选中，需重选）
+            from tkinter import messagebox
+            file_page._select_none()
+            file_page._toggle_select(*first_src)
+            file_page._toggle_select(*second_src)
+            config.MENU_CONFIRM_THRESHOLD = 1
+            messagebox.askyesno = lambda *a, **k: False
+            app.on_open_sources()
+            assert not open_calls, "确认被拒绝时应中止批量打开"
+            messagebox.askyesno = lambda *a, **k: True
+            app.on_open_sources()
+            assert set(open_calls) == {first_src[0], second_src[0]}, "确认通过后应执行"
+            # 在文件夹中显示：按文件数独立计数确认（2 个文件 > 阈值 1）
+            config.MENU_FOLDER_CONFIRM_THRESHOLD = 1
+            spawn_calls.clear()
+            messagebox.askyesno = lambda *a, **k: False
+            app.on_show_sources_in_folder()
+            assert not spawn_calls, "文件夹定位按文件数超阈值且拒绝时应中止"
+            config.MENU_CONFIRM_THRESHOLD = 5
+            config.MENU_FOLDER_CONFIRM_THRESHOLD = 5
+            file_page._select_none()
+            print("[OK] 批量二次确认：选中数/文件数阈值分别控制执行")
 
             # 1f. 预览：表格展示前几行数据（不含索引列，列与行内容正确）
             preview = app.on_preview_source(*first_src)

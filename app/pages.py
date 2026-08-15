@@ -25,6 +25,8 @@ class FilePage(ctk.CTkFrame):
         self.app = app
         self._selected_sources: set = set()  # 当前选中的数据源（(路径, 工作表)）
         self._row_widgets: dict = {}         # (路径, 工作表) -> 行内组件（供选中换肤）
+        self._menu_temp_selected = False     # 右键菜单期间是否临时选中了行
+        self._menu_vars: list = []           # 菜单勾选变量（保持引用防 GC）
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -107,38 +109,121 @@ class FilePage(ctk.CTkFrame):
         }
 
     def _show_row_menu(self, event, path: str, sheet: str) -> None:
-        """行右键菜单：打开/定位、选中管理、设为基准表、重读与删除。"""
-        key = (path, sheet)
-        menu = tk.Menu(self, tearoff=0)
+        """弹出原生右键菜单（tk.Menu + tk_popup）。
 
-        menu.add_command(label="打开", command=lambda: self.app.on_open_source(path, sheet))
-        menu.add_command(label="在文件夹中显示",
-                         command=lambda: self.app.on_show_in_folder(path, sheet))
-        menu.add_command(label="预览", command=lambda: self.app.on_preview_source(path, sheet))
-        menu.add_separator()
-
-        # 选中状态复选：显示当前是否已选中
-        selected_var = tk.BooleanVar(value=key in self._selected_sources)
-        menu.add_checkbutton(label="选中", variable=selected_var,
-                             command=lambda: self._toggle_select(path, sheet))
-        menu.add_command(label="全选", command=self._select_all)
-        menu.add_command(label="取消全选", command=self._select_none)
-        menu.add_separator()
-
-        menu.add_command(label="移除选中", command=self.app.on_remove_selected)
-        menu.add_separator()
-
-        menu.add_command(label="设为基准表", command=lambda: self.app.on_set_base(path, sheet))
-        menu.add_command(label="重载工作表",
-                         command=lambda: self.app.on_reload_source(path, sheet))
-        menu.add_separator()
-
-        menu.add_command(label="删除", command=lambda: self.app.on_remove_source(path, sheet))
-
+        右键在已选中的行上 → 批量操作作用于整个选中；右键在未选中的
+        行上 → 独立操作仅作用于该行。当前无任何选中时临时选中该行，
+        菜单关闭（轮询监测）后自动取消。
+        """
+        self._menu_temp_selected = self._begin_menu_selection(path, sheet)
+        menu = self._build_row_menu(path, sheet)
         try:
             menu.tk_popup(event.x_root, event.y_root)
         finally:
             menu.grab_release()
+        self._watch_menu_close(menu, path, sheet)
+
+    def _watch_menu_close(self, menu, path: str, sheet: str) -> None:
+        """轮询监测菜单是否已关闭，关闭后取消临时选中并释放勾选变量。"""
+        temp = self._menu_temp_selected
+
+        def check() -> None:
+            if not menu.winfo_exists() or not menu.winfo_ismapped():
+                self._end_menu_selection(path, sheet, temp)
+                self._menu_vars = []
+                return
+            self.app.root.after(50, check)
+
+        self.app.root.after(50, check)
+
+    def _build_row_menu(self, path: str, sheet: str) -> tk.Menu:
+        """构建原生右键菜单：打开/定位/预览、选中管理、设为基准表、重载与移除。
+
+        右键在已选中的行上 → 批量操作作用于整个选中；右键在未选中的
+        行上 → 独立操作仅作用于该行。「全选」为开关式勾选；多选时
+        「设为基准表」置灰；数量 >1 时菜单项显示计数。
+        """
+        targets = self._menu_targets(path, sheet)
+        count = len(targets)
+
+        def item_label(text: str) -> str:
+            return f"{text}（{count}）" if count > 1 else text
+
+        menu = tk.Menu(self, tearoff=0)
+
+        menu.add_command(label=item_label("打开"),
+                         command=lambda: self.app.on_open_sources(targets))
+        menu.add_command(label=item_label("在文件夹中显示"),
+                         command=lambda: self.app.on_show_sources_in_folder(targets))
+        menu.add_command(label=item_label("预览"),
+                         command=lambda: self.app.on_preview_sources(targets))
+        menu.add_separator()
+
+        # 选中管理：勾选变量保存在 self._menu_vars，避免局部变量被 GC
+        # 导致 Tcl 变量删除、勾勾无法显示
+        selected_var = tk.BooleanVar(value=(path, sheet) in self._selected_sources)
+        all_selected = bool(self._row_widgets) and \
+            len(self._selected_sources) == len(self._row_widgets)
+        all_var = tk.BooleanVar(value=all_selected)
+        self._menu_vars = [selected_var, all_var]
+
+        menu.add_checkbutton(label="选中", variable=selected_var,
+                             command=lambda: self._toggle_select(path, sheet))
+        menu.add_checkbutton(label="全选", variable=all_var,
+                             command=self._toggle_select_all)
+        menu.add_separator()
+
+        # 设为基准表：仅单个目标时可用，多目标置灰
+        menu.add_command(label="设为基准表",
+                         state="normal" if count == 1 else "disabled",
+                         command=lambda: self.app.on_set_base(targets))
+        menu.add_command(label=item_label("重载工作表"),
+                         command=lambda: self.app.on_reload_sources(targets))
+        menu.add_separator()
+
+        menu.add_command(label=item_label("移除"),
+                         command=lambda: self.app.on_remove_selected(targets))
+
+        return menu
+
+    def _begin_menu_selection(self, path: str, sheet: str) -> bool:
+        """当前无任何选中时，临时选中该行（菜单显示期间提供视觉反馈）。
+
+        返回 True 表示菜单关闭后需恢复取消选中。
+        """
+        key = (path, sheet)
+        if self._selected_sources or key in self._selected_sources:
+            return False
+        self._selected_sources.add(key)
+        widgets = self._row_widgets.get(key)
+        if widgets is not None:
+            self._apply_row_style(widgets, selected=True)
+        return True
+
+    def _end_menu_selection(self, path: str, sheet: str, was_temp: bool) -> None:
+        """菜单关闭后取消临时选中（仅当曾临时选中时）。"""
+        if not was_temp:
+            return
+        key = (path, sheet)
+        self._selected_sources.discard(key)
+        widgets = self._row_widgets.get(key)
+        if widgets is not None:
+            self._apply_row_style(widgets, selected=False)
+
+    def _menu_targets(self, path: str, sheet: str) -> list:
+        """右键菜单的操作目标：右键在已选中的行上 → 整个选中（批量）；
+        右键在未选中的行上 → 仅该行（独立操作）。"""
+        key = (path, sheet)
+        if key in self._selected_sources:
+            return list(self._selected_sources)
+        return [(path, sheet)]
+
+    def _toggle_select_all(self) -> None:
+        """全选开关：全部已选时取消全选，否则全选。"""
+        if self._row_widgets and len(self._selected_sources) == len(self._row_widgets):
+            self._select_none()
+        else:
+            self._select_all()
 
     def _select_all(self) -> None:
         """全选：选中全部数据源行。"""

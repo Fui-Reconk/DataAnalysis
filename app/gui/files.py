@@ -102,16 +102,16 @@ class FileOpsMixin(AppBase):
         return PreviewDialog(self.root, f"预览：{os.path.basename(path)} [{sheet}]",
                              columns, rows, info, shift=shift, scale=scale)
 
-    def on_open_source(self, path: str, sheet: str) -> None:
-        """用系统默认程序（Office / WPS 等）打开数据源所在文件。"""
+    def on_open_source(self, path: str) -> None:
+        """用系统默认程序（Office / WPS 等）打开指定文件。"""
         try:
             open_with_system(path)
         except Exception as exc:  # 打开失败需提示（BLE001 见 .flake8）
             messagebox.showerror(
                 "打开失败", f"无法用系统默认程序打开文件：\n{path}\n\n{exc}")
 
-    def on_show_in_folder(self, path: str, sheet: str) -> None:
-        """在系统文件管理器中定位数据源所在文件。"""
+    def on_show_in_folder(self, path: str) -> None:
+        """在系统文件管理器中定位指定文件。"""
         try:
             show_in_folder(path)
         except Exception as exc:  # 定位失败需提示（BLE001 见 .flake8）
@@ -133,8 +133,12 @@ class FileOpsMixin(AppBase):
         self.state.dataframes[src] = df
         self._after_files_changed(f"已重载：{os.path.basename(path)} [{sheet}]")
 
-    def on_set_base(self, path: str, sheet: str) -> None:
-        """将指定数据源设为匹配基准表（移到列表首位）。"""
+    def on_set_base(self, targets: list | None = None) -> None:
+        """将目标设为匹配基准表（仅单个目标时生效）。"""
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if len(selected) != 1:
+            return
+        path, sheet = selected[0]
         src = (path, sheet)
         if src not in self.state.sources:
             return
@@ -144,6 +148,70 @@ class FileOpsMixin(AppBase):
         self.state.sources.remove(src)
         self.state.sources.insert(0, src)
         self._after_files_changed(f"已设为匹配基准表：{os.path.basename(path)} [{sheet}]")
+
+    # ---- 批量操作（右键菜单：对全部选中执行，超过阈值需二次确认） ----
+
+    def _confirm_batch(self, action: str, count: int, unit: str = "工作表",
+                       threshold: int | None = None) -> bool:
+        """批量操作二次确认：数量超过阈值时弹窗询问（阈值缺省用全局值）。"""
+        if threshold is None:
+            threshold = config.MENU_CONFIRM_THRESHOLD
+        if count <= threshold:
+            return True
+        return messagebox.askyesno(
+            "确认操作", f"将对 {count} 个{unit}执行「{action}」，确认继续？")
+
+    def on_open_sources(self, targets: list | None = None) -> None:
+        """打开目标工作表所在文件（同一文件只打开一次）。
+
+        targets 缺省时使用当前选中；右键菜单显式传入操作目标。
+        """
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要打开的工作表。")
+            return
+        if not self._confirm_batch("打开文件", len(selected)):
+            return
+        for path in dict.fromkeys(p for p, _ in selected):
+            self.on_open_source(path)
+
+    def on_show_sources_in_folder(self, targets: list | None = None) -> None:
+        """在文件管理器中定位目标工作表所在文件（按文件去重）。
+
+        二次确认按「文件数」独立计数（阈值见 folder_confirm_threshold）。
+        """
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要定位的工作表。")
+            return
+        files = list(dict.fromkeys(p for p, _ in selected))
+        if not self._confirm_batch("在文件夹中显示", len(files), unit="文件",
+                                   threshold=config.MENU_FOLDER_CONFIRM_THRESHOLD):
+            return
+        for path in files:
+            self.on_show_in_folder(path)
+
+    def on_preview_sources(self, targets: list | None = None) -> None:
+        """预览目标工作表（级联排列，首个在前）。"""
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要预览的工作表。")
+            return
+        if not self._confirm_batch("预览", len(selected)):
+            return
+        for i, (path, sheet) in enumerate(selected):
+            self.on_preview_source(path, sheet, shift=(i * 24, i * 24))
+
+    def on_reload_sources(self, targets: list | None = None) -> None:
+        """重载目标工作表。"""
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要重载的工作表。")
+            return
+        if not self._confirm_batch("重载", len(selected)):
+            return
+        for path, sheet in selected:
+            self.on_reload_source(path, sheet)
 
     def _add_sources(self, selected) -> None:
         """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。
@@ -186,11 +254,13 @@ class FileOpsMixin(AppBase):
         else:
             self.set_status(config.STATUS_READY)
 
-    def on_remove_selected(self) -> None:
-        """移除文件列表中当前选中的数据源（文件+工作表）。"""
-        selected = self.pages[0].selected_sources
+    def on_remove_selected(self, targets: list | None = None) -> None:
+        """移除目标工作表（超过阈值时二次确认）。"""
+        selected = self.pages[0].selected_sources if targets is None else targets
         if not selected:
             messagebox.showinfo("提示", "请先在工作表列表中点击选中要移除的数据源。")
+            return
+        if not self._confirm_batch("删除", len(selected)):
             return
         for path, sheet in selected:
             self._remove_source(path, sheet)

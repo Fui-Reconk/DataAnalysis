@@ -35,6 +35,7 @@ htmlcov/
 
 # ==== 数据文件（本工具加载/导出的 Excel、CSV 属用户数据，不应入库）====
 docs/
+start.md
 *.xlsx
 *.xls
 *.xlsm
