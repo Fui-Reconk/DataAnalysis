@@ -20,6 +20,7 @@ class SheetPickerDialog(ctk.CTkToplevel):
         super().__init__(master)
         self._on_confirm = on_confirm
         self._vars: dict = {}
+        self._checkboxes: dict = {}
 
         self.title(title)
         self.resizable(False, False)
@@ -47,11 +48,16 @@ class SheetPickerDialog(ctk.CTkToplevel):
         self.grid_columnconfigure(0, weight=1)
 
         for key, label in options:
+            # 变量与勾选框的 on/off 语义必须一致（onvalue/offvalue）：
+            # 否则视觉勾选状态与变量值脱节，会出现"点击选中却被反选"、
+            # "全选/全不选无反应"等问题
             var = ctk.StringVar(value="on" if default_checked else "")
             self._vars[key] = var
-            ctk.CTkCheckBox(scroll, text=label, variable=var,
-                            font=config.FONT_BODY).pack(
-                fill="x", padx=8, pady=3)
+            checkbox = ctk.CTkCheckBox(scroll, text=label, variable=var,
+                                       onvalue="on", offvalue="",
+                                       font=config.FONT_BODY)
+            checkbox.pack(fill="x", padx=8, pady=3)
+            self._checkboxes[key] = checkbox
 
         # 底部操作栏：全选 / 全不选 / 取消 / 确定
         bar = ctk.CTkFrame(self, fg_color="transparent")

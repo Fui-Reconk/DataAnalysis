@@ -279,25 +279,37 @@ def main() -> int:
             app.on_apply_filter()  # 应弹提示而非崩溃
             print("[OK] 未匹配时过滤被正确拦截")
 
-            # 8. 工作表多选对话框：默认全选，确定后按勾选顺序回调
+            # 8. 工作表多选对话框：勾选语义（视觉与变量一致）与全选/全不选
             from app.sheet_dialog import SheetPickerDialog
             picked = []
             dlg = SheetPickerDialog(root, "测试对话框",
                                     [("s1", "表一"), ("s2", "表二"), ("s3", "表三")],
                                     on_confirm=lambda keys: picked.append(keys))
             root.update()
+            # 默认全选：变量与视觉勾选状态一致
+            for key in ("s1", "s2", "s3"):
+                assert dlg._vars[key].get() == "on" and dlg._checkboxes[key].get() == "on", \
+                    "默认应全部勾选（视觉与变量一致）"
+            # 模拟真实点击：勾选中的 s1 点一下 → 取消勾选
+            dlg._checkboxes["s1"].toggle()
+            root.update()
+            assert dlg._vars["s1"].get() == "", "点击勾选中的项应取消勾选"
+            # 全不选 / 全选：变量与视觉同步
+            dlg._select_none()
+            root.update()
+            assert all(v.get() == "" for v in dlg._vars.values()), "全不选应全部取消"
+            assert all(cb.get() == "" for cb in dlg._checkboxes.values()), "全不选后视觉应未勾选"
+            dlg._select_all()
+            root.update()
+            assert all(v.get() == "on" for v in dlg._vars.values()), "全选应全部勾选"
+            assert all(cb.get() == "on" for cb in dlg._checkboxes.values()), "全选后视觉应勾选"
+            # 只勾选 s2 后确定 → 回调恰好为 [s2]（不反向）
+            dlg._select_none()
+            dlg._vars["s2"].set("on")
             dlg._on_ok()
             root.update()
-            assert picked and picked[0] == ["s1", "s2", "s3"], "默认全选应回调全部选项"
-            dlg2 = SheetPickerDialog(root, "测试对话框",
-                                     [("a", "A"), ("b", "B")],
-                                     on_confirm=lambda keys: picked.append(keys))
-            dlg2._select_none()
-            dlg2._vars["b"].set("on")
-            dlg2._on_ok()
-            root.update()
-            assert picked[1] == ["b"], "取消全选后仅勾选项应被回调"
-            print("[OK] 工作表多选对话框：默认全选 / 勾选回调正确")
+            assert picked and picked[0] == ["s2"], "确定应只回调勾选项，不得反向"
+            print("[OK] 工作表多选对话框：勾选/全选/全不选语义正确，无反向选中")
 
             print("\n=== GUI 冒烟测试全部通过 ===")
         except Exception as exc:  # 测试失败时输出错误（BLE001 见 .flake8）
