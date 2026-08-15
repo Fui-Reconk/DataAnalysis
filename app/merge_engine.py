@@ -46,7 +46,7 @@ def left_join(dataframes: Dict[str, pd.DataFrame], paths: List[str], key: str) -
 
 def _normalize_key(series: pd.Series) -> pd.Series:
     """匹配键标准化：空值填充哨兵值，统一转字符串并去除首尾空格。"""
-    return series.fillna(NAN_SENTINEL).astype(str).str.strip() # type: ignore
+    return series.fillna(NAN_SENTINEL).astype(str).str.strip()  # type: ignore
 
 
 def _validate_key(df: pd.DataFrame, path: str, key: str) -> None:

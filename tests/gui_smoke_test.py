@@ -13,21 +13,17 @@ import sys
 import tempfile
 import time
 
+import customtkinter as ctk
+import pandas as pd
+
 # 强制 UTF-8 输出，避免 Windows GBK 控制台编码错误
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
 
-# 将项目根目录加入搜索路径
+# 将项目根目录加入搜索路径（测试以脚本方式运行时需手动添加）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import pandas as pd  # noqa: E402
-import customtkinter as ctk  # noqa: E402
-
-from app import config  # noqa: E402
-from app.gui import DataMatcherApp  # noqa: E402
-from app.data_loader import load_excel, scan_columns  # noqa: E402
 
 
 def _wait_until(root, cond, timeout_ms=2000) -> bool:
@@ -58,6 +54,9 @@ def _make_sample_files(tmp: str) -> list:
 
 
 def main() -> int:
+    # app 包依赖上面的项目根目录路径引导，故延迟到函数内导入
+    from app.gui import DataMatcherApp
+
     tmp = tempfile.mkdtemp(prefix="gui_smoke_")
     paths = _make_sample_files(tmp)
 
@@ -68,6 +67,9 @@ def main() -> int:
     app = DataMatcherApp(root)
 
     def run_flow() -> None:
+        from app import config
+        from app.data_loader import load_excel
+
         try:
             # 0. 浮层窗口应在启动时预创建（隐藏）——触发时只淡入既有窗口，不新建窗口
             assert app._overlay is not None, "浮层窗口应在启动时预创建"
@@ -256,7 +258,7 @@ def main() -> int:
             print("[OK] 未匹配时过滤被正确拦截")
 
             print("\n=== GUI 冒烟测试全部通过 ===")
-        except Exception as exc:  # noqa: BLE001 —— 测试失败时输出错误
+        except Exception as exc:  # 测试失败时输出错误（BLE001 见 .flake8）
             import traceback
             traceback.print_exc()
             print(f"\n=== GUI 冒烟测试失败：{exc} ===")

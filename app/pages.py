@@ -126,8 +126,7 @@ class MatchPage(ctk.CTkFrame):
         self.key_combo.grid(row=0, column=1, sticky="ew", padx=(0, 14), pady=14)
 
         # 说明
-        ctk.CTkLabel(self, text="以第一个加载的表格为基准，对其余表格按主键做左连接匹配。\n"
-                               "若其他表格缺少所选列，将提示具体文件与列名。",
+        ctk.CTkLabel(self, text="以第一个加载的表格为基准，对其余表格按主键做左连接匹配。\n若其他表格缺少所选列，将提示具体文件与列名。",
                      font=config.FONT_SMALL, text_color="gray60", justify="left").grid(
             row=2, column=0, sticky="w", padx=20, pady=6)
 
@@ -168,8 +167,7 @@ class FilterPage(ctk.CTkFrame):
             row=0, column=0, sticky="w", padx=20, pady=(20, 10))
 
         # 语法说明
-        ctk.CTkLabel(self, text="Pandas 查询语句（字段名需与表头一致，字符串值需加引号），例如：\n"
-                               "销售额 > 1000 and 地区 == '华东'",
+        ctk.CTkLabel(self, text="Pandas 查询语句（字段名需与表头一致，字符串值需加引号），例如：\n销售额 > 1000 and 地区 == '华东'",
                      font=config.FONT_SMALL, text_color="gray60", justify="left").grid(
             row=1, column=0, sticky="w", padx=20, pady=(0, 8))
 

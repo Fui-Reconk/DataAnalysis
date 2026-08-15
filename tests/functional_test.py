@@ -11,22 +11,16 @@ import os
 import sys
 import tempfile
 
+import pandas as pd
+
 # 强制 UTF-8 输出，避免 Windows GBK 控制台编码错误
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 except (AttributeError, ValueError):
     pass
 
-# 将项目根目录加入搜索路径
+# 将项目根目录加入搜索路径（测试以脚本方式运行时需手动添加）
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
-import pandas as pd  # noqa: E402
-
-from app.data_loader import load_excel, scan_columns  # noqa: E402
-from app.merge_engine import left_join  # noqa: E402
-from app.filter_engine import apply_query  # noqa: E402
-from app.stats import calculate_default_stats  # noqa: E402
-from app.exporter import export_excel  # noqa: E402
 
 
 def _build_sample(tmp: str) -> list:
@@ -60,13 +54,20 @@ def _assert(cond: bool, msg: str) -> None:
 
 
 def main() -> int:
+    # app 包依赖上面的项目根目录路径引导，故延迟到函数内导入
+    from app.data_loader import load_excel, scan_columns
+    from app.merge_engine import left_join
+    from app.filter_engine import apply_query
+    from app.stats import calculate_default_stats
+    from app.exporter import export_excel
+
     tmp = tempfile.mkdtemp(prefix="data_matcher_test_")
     print("=== 1. 文件读取与表头扫描 ===")
     paths = _build_sample(tmp)
     dataframes = {}
     for p in paths:
         dataframes[p] = load_excel(p)
-    _assert(len(dataframes) == 3, f"读取 3 个表格成功")
+    _assert(len(dataframes) == 3, "读取 3 个表格成功")
 
     union = scan_columns(paths, dataframes)
     _assert("订单号" in union and "地区" in union and "数量" in union and "成本" in union,

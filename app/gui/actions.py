@@ -66,7 +66,7 @@ class OperationsMixin(AppBase):
         try:
             try:
                 result = apply_query(self.state.merged_df, query)
-            except Exception as exc:  # noqa: BLE001 —— 过滤语法错误需弹窗提示，不崩溃
+            except Exception as exc:  # 过滤语法错误需弹窗提示，不崩溃（BLE001 见 .flake8）
                 messagebox.showerror("过滤失败", f"过滤语句解析失败：\n{exc}\n\n请检查字段名与语法。")
                 return
             self.state.filtered_df = result
@@ -103,7 +103,7 @@ class OperationsMixin(AppBase):
         try:
             try:
                 stats_df = calculate_default_stats(data_df)
-            except Exception as exc:  # noqa: BLE001 —— 统计逻辑由用户编写，出错需兜底
+            except Exception as exc:  # 统计逻辑由用户编写，出错需兜底（BLE001 见 .flake8）
                 messagebox.showerror("统计计算失败", f"calculate_default_stats 执行出错：\n{exc}")
                 stats_df = None
         finally:
@@ -122,8 +122,8 @@ class OperationsMixin(AppBase):
         self.set_status("正在写入 Excel…")
         try:
             try:
-                out_path = export_excel(data_df, stats_df, path) # type: ignore
-            except Exception as exc:  # noqa: BLE001 —— 写入失败需弹窗提示
+                out_path = export_excel(data_df, stats_df, path)  # type: ignore
+            except Exception as exc:  # 写入失败需弹窗提示（BLE001 见 .flake8）
                 messagebox.showerror("导出失败", f"写入文件失败：\n{exc}")
                 return
         finally:

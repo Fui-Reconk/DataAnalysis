@@ -34,7 +34,7 @@ class FileOpsMixin(AppBase):
                 self.set_status(f"正在读取：{os.path.basename(path)} …")
                 try:
                     df = load_excel(path)
-                except Exception as exc:  # noqa: BLE001 —— 读取失败需逐个提示并跳过
+                except Exception as exc:  # 读取失败需逐个提示并跳过（BLE001 见 .flake8）
                     failed.append((path, str(exc)))
                     continue
                 self.state.dataframes[path] = df

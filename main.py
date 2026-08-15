@@ -3,17 +3,14 @@
 运行方式（在项目根目录）：
     Windows：.venv\\Scripts\\python.exe main.py
     macOS/Linux：.venv/bin/python main.py
+
+以脚本方式运行时，Python 会自动将本文件所在目录（项目根目录）加入
+模块搜索路径，因此可以直接导入 app 包，无需手动修改 sys.path。
 """
-import os
-import sys
+import customtkinter as ctk
 
-# 确保将项目根目录加入模块搜索路径，兼容双击或不同工作目录启动
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import customtkinter as ctk  # noqa: E402 —— 需在路径修正之后导入
-
-from app import config  # noqa: E402
-from app.gui import DataMatcherApp  # noqa: E402
+from app import config
+from app.gui import DataMatcherApp
 
 
 def main() -> None:
