@@ -98,3 +98,8 @@ EXCEL_FILE_TYPES = _file_types()
 # ---------- 对话框 ----------
 SHEET_PICKER_WIDTH = _cfg.getint("dialog", "sheet_picker_width", fallback=400)
 SHEET_PICKER_HEIGHT = _cfg.getint("dialog", "sheet_picker_height", fallback=460)
+
+# ---------- 文件加载页工作表行配色 ----------
+FILE_ROW_TEXT_COLOR = _pair("file_list", "text_color", ("#1A1A1A", "#F2F2F2"))
+FILE_ROW_SUBTEXT_COLOR = _pair("file_list", "subtext_color", ("#5A6472", "#AEB6C2"))
+FILE_ROW_HOVER_COLOR = _pair("file_list", "hover_color", ("#D5DCE4", "#39424F"))

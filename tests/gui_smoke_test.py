@@ -215,6 +215,26 @@ def main() -> int:
             app._refresh_match_page()
             print("[OK] 注入文件并刷新列表")
 
+            # 1b. 文件行选中对比：选中后整行主题色背景 + 白色文字，取消选中恢复高对比默认色
+            first_src = app.state.sources[0]
+            app.pages[0]._toggle_select(*first_src)
+            root.update()
+            row_widgets = app.pages[0]._row_widgets[first_src]
+            active_color = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
+            assert row_widgets["frame"].cget("fg_color") == active_color, \
+                "选中行背景应为主题色"
+            assert row_widgets["btn"].cget("text_color") == config.NAV_ACTIVE_TEXT_COLOR, \
+                "选中行名称文字应为白色"
+            assert row_widgets["path_label"].cget("text_color") == config.NAV_ACTIVE_TEXT_COLOR, \
+                "选中行路径文字应为白色"
+            app.pages[0]._toggle_select(*first_src)
+            root.update()
+            assert row_widgets["frame"].cget("fg_color") == "transparent", \
+                "取消选中后行背景应恢复透明"
+            assert row_widgets["btn"].cget("text_color") == config.FILE_ROW_TEXT_COLOR, \
+                "取消选中后名称文字应恢复高对比默认色"
+            print("[OK] 文件行选中：主题色背景 + 白色文字，取消后恢复默认高对比")
+
             # 2. 切换 4 个页面（验证侧边栏导航）
             for i in range(4):
                 app._show_page(i)

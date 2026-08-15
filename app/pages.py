@@ -23,6 +23,7 @@ class FilePage(ctk.CTkFrame):
         super().__init__(master, **kwargs)
         self.app = app
         self._selected_sources: set = set()  # 当前选中的数据源（(路径, 工作表)）
+        self._row_widgets: dict = {}         # (路径, 工作表) -> 行内组件（供选中换肤）
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(2, weight=1)
@@ -42,7 +43,8 @@ class FilePage(ctk.CTkFrame):
                       font=config.FONT_BODY, width=110, fg_color="gray35",
                       hover_color="gray45").pack(side="left", padx=(0, 10))
         ctk.CTkLabel(btn_frame, text="（点击行可选中，第一个为匹配基准表；同一文件可添加多个工作表）",
-                     font=config.FONT_SMALL, text_color="gray60").pack(side="left", padx=(10, 0))
+                     font=config.FONT_SMALL, text_color=config.FILE_ROW_SUBTEXT_COLOR).pack(
+            side="left", padx=(10, 0))
 
         # 数据源列表（可滚动）
         self.list_frame = ctk.CTkScrollableFrame(self, fg_color="transparent")
@@ -57,11 +59,13 @@ class FilePage(ctk.CTkFrame):
         for child in self.list_frame.winfo_children():
             child.destroy()
         self._selected_sources.clear()
+        self._row_widgets.clear()
 
         sources = self.app.state.sources
         if not sources:
             ctk.CTkLabel(self.list_frame, text="尚未添加工作表", font=config.FONT_BODY,
-                         text_color="gray60").grid(row=0, column=0, pady=40)
+                         text_color=config.FILE_ROW_SUBTEXT_COLOR).grid(
+                row=0, column=0, pady=40)
             return
 
         for index, (path, sheet) in enumerate(sources):
@@ -73,33 +77,58 @@ class FilePage(ctk.CTkFrame):
         row.grid(row=index, column=0, sticky="ew", pady=4)
         row.grid_columnconfigure(0, weight=1)
 
-        # 名称按钮：点击切换选中状态（用于“移除选中”）
+        # 名称按钮：默认高对比文字 + 悬停背景，点击切换选中状态
         name_btn = ctk.CTkButton(
             row, text=f"{index + 1}. {os.path.basename(path)} [{sheet}]",
-            font=config.FONT_BODY, fg_color="transparent", hover_color="gray30", anchor="w")
+            font=config.FONT_BODY, fg_color="transparent",
+            text_color=config.FILE_ROW_TEXT_COLOR,
+            hover_color=config.FILE_ROW_HOVER_COLOR, anchor="w")
         name_btn.grid(row=0, column=0, sticky="ew", padx=(10, 6), pady=4)
-        # 先创建按钮，再绑定点击命令（闭包捕获 path/sheet 与按钮自身）
-        name_btn.configure(command=lambda: self._toggle_select(path, sheet, name_btn))
+        name_btn.configure(command=lambda: self._toggle_select(path, sheet))
 
-        # 完整路径小字提示
-        ctk.CTkLabel(row, text=f"{path} · 工作表「{sheet}」", font=config.FONT_SMALL,
-                     text_color="gray60", anchor="w").grid(
-            row=1, column=0, sticky="w", padx=(10, 6), pady=(0, 4))
+        # 完整路径小字提示（次级信息，保证可读）
+        path_label = ctk.CTkLabel(row, text=f"{path} · 工作表「{sheet}」",
+                                  font=config.FONT_SMALL,
+                                  text_color=config.FILE_ROW_SUBTEXT_COLOR, anchor="w")
+        path_label.grid(row=1, column=0, sticky="w", padx=(10, 6), pady=(0, 4))
 
         # 单独移除按钮
         ctk.CTkButton(row, text="✕", width=34, fg_color="gray35", hover_color="firebrick3",
                       command=lambda p=path, s=sheet: self.app.on_remove_source(p, s)).grid(
             row=0, column=1, rowspan=2, padx=(0, 8), pady=4)
 
-    def _toggle_select(self, path: str, sheet: str, btn) -> None:
-        """切换某数据源行的选中状态。"""
+        self._row_widgets[(path, sheet)] = {
+            "frame": row, "btn": name_btn, "path_label": path_label,
+        }
+
+    def _toggle_select(self, path: str, sheet: str) -> None:
+        """切换某数据源行的选中状态（选中：主题色背景 + 白字，对比明显）。"""
         key = (path, sheet)
+        widgets = self._row_widgets.get(key)
+        if widgets is None:
+            return
         if key in self._selected_sources:
             self._selected_sources.discard(key)
-            btn.configure(fg_color="transparent", hover_color="gray30")
+            self._apply_row_style(widgets, selected=False)
         else:
             self._selected_sources.add(key)
-            btn.configure(fg_color="gray30", hover_color="gray40")
+            self._apply_row_style(widgets, selected=True)
+
+    def _apply_row_style(self, widgets: dict, selected: bool) -> None:
+        """按选中/未选中应用整行配色（背景 + 文字）。"""
+        if selected:
+            active = ctk.ThemeManager.theme["CTkButton"]["fg_color"]
+            widgets["frame"].configure(fg_color=active)
+            widgets["btn"].configure(fg_color="transparent",
+                                     text_color=config.NAV_ACTIVE_TEXT_COLOR,
+                                     hover_color=active)
+            widgets["path_label"].configure(text_color=config.NAV_ACTIVE_TEXT_COLOR)
+        else:
+            widgets["frame"].configure(fg_color="transparent")
+            widgets["btn"].configure(fg_color="transparent",
+                                     text_color=config.FILE_ROW_TEXT_COLOR,
+                                     hover_color=config.FILE_ROW_HOVER_COLOR)
+            widgets["path_label"].configure(text_color=config.FILE_ROW_SUBTEXT_COLOR)
 
     @property
     def selected_sources(self) -> list:
