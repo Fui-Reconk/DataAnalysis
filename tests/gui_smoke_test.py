@@ -69,6 +69,14 @@ def main() -> int:
 
     def run_flow() -> None:
         try:
+            # 0. 浮层窗口应在启动时预创建（隐藏）——触发时只淡入既有窗口，不新建窗口
+            assert app._overlay is not None, "浮层窗口应在启动时预创建"
+            assert not app._overlay.winfo_viewable(), "预创建的浮层窗口应处于隐藏状态"
+            startup_toplevels = [w for w in root.winfo_children()
+                                 if isinstance(w, ctk.CTkToplevel)]
+            assert len(startup_toplevels) == 1, "启动时只允许存在一个浮层窗口"
+            print("[OK] 浮层窗口启动时预创建且隐藏（无新窗口闪现）")
+
             # 0. 默认展开 + 点击开合（无动画）+ 半透明浮层
             # 说明：winfo_width 反映渲染像素（含显示缩放），随设备变化；
             #       此处用 cget("width") 断言逻辑宽度；目标取应用实际值
@@ -134,10 +142,64 @@ def main() -> int:
             assert ok, "浮层应收起并隐藏"
             print("[OK] 移出浮层：快速收起并隐藏")
 
+            # 快速进出导航区（模拟 12 个组件上 Enter/Leave 抖动）：
+            # 始终只允许存在一个浮层窗口（防"多个浮层"幽灵窗口），且最终回到隐藏态
+            for _ in range(6):
+                app._on_nav_area_enter()
+                app._on_nav_area_leave()
+                root.update()
+            toplevels = [w for w in root.winfo_children() if isinstance(w, ctk.CTkToplevel)]
+            assert len(toplevels) == 1, f"应始终只有一个浮层窗口，实际 {len(toplevels)} 个"
+            ok = _wait_until(
+                root,
+                lambda: not app._overlay_visible and not app._overlay.winfo_viewable(),
+                timeout_ms=2000)
+            assert ok, "快速进出后浮层应回到隐藏状态"
+            print("[OK] 快速进出导航区：始终只有一个浮层，无幽灵窗口")
+
+            # 应用失焦（alt-tab / 点击其他应用）→ 浮层立即收起，不再卡在其他应用上层
+            app._on_nav_area_enter()
+            ok = _wait_until(
+                root, lambda: app._overlay_visible and app._overlay.winfo_viewable())
+            assert ok, "浮层应显示"
+            root.event_generate("<<Deactivate>>")
+            root.update()
+            assert not app._overlay_visible, "应用失焦后浮层应收起"
+            assert not app._overlay.winfo_viewable(), "应用失焦后浮层窗口应隐藏"
+            print("[OK] 应用失焦：浮层立即收起，不滞留其他应用上层")
+
+            # 根窗口 FocusOut 但焦点在浮层内（用户正在点击浮层）→ 不应误收起
+            app._on_nav_area_enter()
+            ok = _wait_until(
+                root, lambda: app._overlay_visible and app._overlay.winfo_viewable())
+            assert ok, "浮层应显示"
+            app._overlay.focus_force()
+            root.update()
+            root.event_generate("<FocusOut>")
+            root.update()
+            assert app._overlay_visible, "焦点在浮层内时 FocusOut 不应收起浮层"
+            app._hide_overlay()
+            ok = _wait_until(
+                root,
+                lambda: not app._overlay_visible and not app._overlay.winfo_viewable(),
+                timeout_ms=2000)
+            assert ok, "浮层应收起并隐藏"
+            print("[OK] 焦点在浮层内：FocusOut 不误收起")
+
             # 恢复展开
             app._set_sidebar_expanded(True)
             assert app.sidebar.cget("width") == app._width_expanded
             print("[OK] 重新展开")
+
+            # 悬停高亮回归：非激活导航项悬停时应显示候选背景色（展开态，浮层逻辑不介入）
+            # 注：CTkFrame 的 bind 挂在内部 _canvas 上，需对 _canvas 生成事件
+            hover_row = app._nav_rows[1]
+            hover_row["frame"]._canvas.event_generate("<Enter>")
+            root.update()
+            assert hover_row["frame"].cget("fg_color") == config.NAV_HOVER_COLOR, \
+                "悬停导航项应显示候选背景色"
+            hover_row["frame"]._canvas.event_generate("<Leave>")
+            print("[OK] 悬停高亮：非激活导航项显示候选背景色")
 
             # 1. 程序化注入文件（绕过文件对话框）
             for p in paths:

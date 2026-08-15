@@ -9,12 +9,23 @@ import customtkinter as ctk
 
 from app import config
 
+# Windows 上禁用 CTkToplevel 的标题栏颜色操纵（CustomTkinter 官方提供的类级开关）。
+# 该机制在 __init__ 内部会调用 update() 泵事件循环，并 after(5ms) 调度窗口状态
+# 恢复回调——可能在不受控的时机把窗口映射出来，闪现一个标题为 "CTkToplevel"
+# 的独立窗口（即用户看到的"新窗口"）。浮层是无边框无标题的半透明窗口，
+# 完全不需要这套机制；必须在任何 CTkToplevel 创建前设置。
+ctk.CTkToplevel._deactivate_windows_window_header_manipulation = True
+
 
 class OverlayMixin:
     """半透明浮层：懒创建、淡入淡出动画与移出收起判定。"""
 
     def _bind_nav_hover_events(self, widget) -> None:
-        """仅功能分区按钮区域悬停时触发半透明浮层展开。"""
+        """仅功能分区按钮区域悬停时触发半透明浮层展开。
+
+        CTk 组件的 bind 默认 add=True（追加），不会覆盖 _build_nav_row
+        中已绑定的悬停高亮事件。
+        """
         widget.bind("<Enter>", lambda _e: self._on_nav_area_enter())
         widget.bind("<Leave>", lambda _e: self._on_nav_area_leave())
 
@@ -32,9 +43,16 @@ class OverlayMixin:
             self._schedule_overlay_hide()
 
     def _build_overlay(self) -> None:
-        """构建半透明浮层窗口（覆盖主界面左侧，仅显示功能分区选项）。"""
+        """构建半透明浮层窗口（覆盖主界面左侧，仅显示功能分区选项）。
+
+        幂等：浮层窗口只允许存在一个，重复调用直接返回，杜绝"多个浮层"。
+        """
+        if self._overlay is not None:
+            return
         self._overlay = ctk.CTkToplevel(self.root)
-        self._overlay.overrideredirect(True)
+        self._overlay.title("")                        # 空标题：任何情况下不显示 "CTkToplevel" 字样
+        self._overlay.overrideredirect(True)           # 无边框无标题栏
+        self._overlay.attributes("-toolwindow", True)  # 工具窗口：不进任务栏、不进 Alt-Tab
         self._overlay.attributes("-topmost", True)
         self._overlay.attributes("-alpha", config.SIDEBAR_OVERLAY_ALPHA)
         self._overlay.withdraw()
@@ -83,7 +101,20 @@ class OverlayMixin:
         # 窗口原生背景对齐浮层 frame 颜色：动画重绘滞后时不会露出浅色底（白块残影）
         self._overlay.configure(fg_color=self._overlay_frame.cget("fg_color"))
 
+        # 应用失焦（切换到其他应用/alt-tab）→ 立即收起浮层，避免置顶窗口
+        # 滞留在其他应用上层。Windows 上 Tk 对应用级激活事件有两种写法，
+        # 全部绑定以防兼容差异；绑定一次即可（本方法幂等）。
+        self.root.bind("<Deactivate>", self._on_app_deactivate)
+        self.root.bind("<<Deactivate>>", self._on_app_deactivate)
+        self.root.bind("<FocusOut>", self._on_root_focus_out, add="+")
+        self._overlay.bind("<Deactivate>", self._on_app_deactivate)
+        self._overlay.bind("<<Deactivate>>", self._on_app_deactivate)
+
     def _bind_overlay_events(self, widget) -> None:
+        """浮层内组件悬停：回到浮层取消收起，离开浮层延迟判定收起。
+
+        CTk 组件 bind 默认 add=True（追加），导航行的悬停高亮事件保留。
+        """
         widget.bind("<Enter>", lambda _e: self._cancel_overlay_hide())
         widget.bind("<Leave>", lambda _e: self._schedule_overlay_hide())
 
@@ -133,6 +164,9 @@ class OverlayMixin:
             return
         # 防御：确保没有待处理的收起计时器
         self._cancel_overlay_hide()
+        # 自愈：浮层窗口若已被外部销毁，标记重建（保证始终只有一个浮层）
+        if self._overlay is not None and not self._overlay.winfo_exists():
+            self._overlay = None
         if self._overlay is None:
             self._build_overlay()
         assert self._overlay is not None
@@ -141,10 +175,14 @@ class OverlayMixin:
         # 直接以全宽定位：文字/图标始终完整渲染，窗口尺寸保持不变
         self._set_overlay_geometry(self._width_expanded)
         self._sync_overlay_text(self._width_expanded)
-        # 从不透明(0)快速淡入到半透明效果
+        # 从不透明(0)快速淡入到半透明效果；
+        # deiconify 前先置顶并清零透明度，映射完成后强制刷新，
+        # 避免 Windows 分层窗口半映射残留（幽灵浮层/多个浮层）
+        self._overlay.attributes("-topmost", True)
         self._overlay.attributes("-alpha", 0.0)
         self._overlay.deiconify()
         self._overlay.lift()
+        self._overlay.update_idletasks()
         self._animate_overlay_alpha(config.SIDEBAR_OVERLAY_ALPHA)
 
     def _sync_overlay_text(self, width_logical: int) -> None:
@@ -171,7 +209,53 @@ class OverlayMixin:
             return
         assert self._overlay is not None
         self._overlay_visible = False
-        self._animate_overlay_alpha(0.0, on_complete=self._overlay.withdraw)
+        self._animate_overlay_alpha(0.0, on_complete=self._finish_hide)
+
+    def _finish_hide(self) -> None:
+        """淡出完成：移除置顶属性并隐藏窗口。
+
+        先取消 -topmost 再 withdraw，避免 Windows 分层置顶窗口在
+        取消映射时残留"幽灵窗口"叠在其他应用之上。
+        """
+        if self._overlay is None or not self._overlay.winfo_exists():
+            return
+        self._overlay.attributes("-topmost", False)
+        self._overlay.withdraw()
+        self._overlay.update_idletasks()
+
+    def _hide_overlay_instant(self) -> None:
+        """立即隐藏浮层（无动画）：应用失焦/切走时使用，杜绝浮层滞留。
+
+        同时取消进行中的淡入/淡出动画，防止动画回调把窗口再次拉起。
+        """
+        self._cancel_overlay_hide()
+        self._overlay_anim_token += 1  # 取消未完成的透明度动画
+        self._overlay_visible = False
+        if self._overlay is not None and self._overlay.winfo_exists():
+            self._overlay.attributes("-alpha", 0.0)
+            self._overlay.attributes("-topmost", False)
+            self._overlay.withdraw()
+
+    def _on_app_deactivate(self, event=None) -> None:
+        """应用失去激活（alt-tab / 点击其他应用）→ 立即收起浮层。"""
+        if self._overlay_visible:
+            self._hide_overlay_instant()
+
+    def _on_root_focus_out(self, event=None) -> None:
+        """根窗口失去焦点：焦点若落在浮层内（用户正在操作浮层）则保留，否则收起。"""
+        if not self._overlay_visible:
+            return
+        focus = self.root.focus_get()
+        if focus is not None and self._overlay is not None:
+            widget = focus
+            while widget is not None:
+                if widget is self._overlay:
+                    return  # 焦点在浮层内：不收起（点击浮层按钮/导航项时）
+                try:
+                    widget = widget.master
+                except Exception:
+                    break
+        self._hide_overlay_instant()
 
     def _animate_overlay_alpha(self, target_alpha: float, on_complete=None) -> None:
         """浮层透明度过渡动画（快速淡入/淡出，令牌取消机制避免并发冲突）。

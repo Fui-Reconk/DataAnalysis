@@ -93,6 +93,10 @@ class SidebarMixin:
         # 应用初始展开内容
         self._apply_sidebar_content(True)
 
+        # 浮层窗口在启动时预创建（隐藏）：触发时只是淡入既有窗口，
+        # 不再"触发时才新建窗口"，杜绝新窗口闪现/任务栏闪烁
+        self._build_overlay()
+
     def _build_nav_row(self, master, row, icon, text, index, container) -> None:
         """构建一个导航项行。
 
