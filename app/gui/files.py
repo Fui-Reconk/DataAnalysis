@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox
 from app import config
 from app.data_loader import list_sheets, load_excel, scan_columns
 from app.gui.base import AppBase
+from app.preview_dialog import PreviewDialog, format_cell
 from app.sheet_dialog import SheetPickerDialog
 from app.system_utils import open_with_system, show_in_folder
 
@@ -80,6 +81,28 @@ class FileOpsMixin(AppBase):
         SheetPickerDialog(self.root, "添加工作表（暂存池）", options,
                           on_confirm=self._add_sources)
 
+    def on_preview_source(self, path: str, sheet: str, modal: bool = True,
+                          shift: tuple = (0, 0)):
+        """预览工作表前几行数据（直接使用已加载的内存数据）。
+
+        modal=False 用于多弹窗级联场景；shift 为级联偏移。
+        """
+        df = self.state.dataframes.get((path, sheet))
+        if df is None:
+            messagebox.showwarning("提示", "该数据源尚未加载，无法预览。")
+            return None
+        head = df.head(config.PREVIEW_ROWS)
+        columns = [str(c) for c in head.columns]
+        rows = [
+            [format_cell(v) for v in row]
+            for row in head.itertuples(index=False, name=None)
+        ]
+        info = f"共 {len(df)} 行 × {len(df.columns)} 列，显示前 {min(config.PREVIEW_ROWS, len(df))} 行"
+        # 显示缩放倍率：与浮层同源（侧边栏物理/逻辑宽度比），已验证可靠
+        scale = float(self.sidebar._apply_widget_scaling(1.0))
+        return PreviewDialog(self.root, f"预览：{os.path.basename(path)} [{sheet}]",
+                             columns, rows, info, modal=modal, shift=shift, scale=scale)
+
     def on_open_source(self, path: str, sheet: str) -> None:
         """用系统默认程序（Office / WPS 等）打开数据源所在文件。"""
         try:
@@ -124,16 +147,20 @@ class FileOpsMixin(AppBase):
         self._after_files_changed(f"已设为匹配基准表：{os.path.basename(path)} [{sheet}]")
 
     def _add_sources(self, selected) -> None:
-        """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。"""
+        """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。
+
+        添加成功后自动弹出首个新数据源的预览。
+        """
         if not selected:
             self.set_status("未添加任何工作表。")
             return
 
-        added = 0
+        added_sources = []
         self.start_progress()
         try:
             for path, sheet in selected:
-                if (path, sheet) in self.state.sources:
+                src = (path, sheet)
+                if src in self.state.sources:
                     continue
                 try:
                     df = load_excel(path, sheet)
@@ -142,15 +169,21 @@ class FileOpsMixin(AppBase):
                         "读取失败",
                         f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")
                     continue
-                self.state.sources.append((path, sheet))
-                self.state.dataframes[(path, sheet)] = df
-                added += 1
+                self.state.sources.append(src)
+                self.state.dataframes[src] = df
+                added_sources.append(src)
                 self.root.update_idletasks()
         finally:
             self.stop_progress()
 
-        if added:
-            self._after_files_changed(f"已添加 {added} 个工作表，当前共 {len(self.state.sources)} 个。")
+        if added_sources:
+            self._after_files_changed(
+                f"已添加 {len(added_sources)} 个工作表，当前共 {len(self.state.sources)} 个。")
+            # 导入后按配置自动弹出预览（数量可配，首个模态，其余级联非模态）
+            if config.PREVIEW_AUTO_SHOW:
+                count = max(1, min(config.PREVIEW_AUTO_SHOW_COUNT, len(added_sources)))
+                for i, src in enumerate(added_sources[:count]):
+                    self.on_preview_source(*src, modal=(i == 0), shift=(i * 24, i * 24))
         else:
             self.set_status(config.STATUS_READY)
 

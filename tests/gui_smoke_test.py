@@ -283,6 +283,24 @@ def main() -> int:
             assert spawn_calls and spawn_calls[0][0][0] == "explorer", "应调用 explorer 定位文件"
             print("[OK] 右键菜单：在文件夹中显示（explorer 定位）")
 
+            # 1f. 预览：表格展示前几行数据（不含索引列，列与行内容正确）
+            preview = app.on_preview_source(*first_src)
+            root.update()
+            assert preview is not None, "预览弹窗应创建"
+            assert preview.columns == ["订单号", "地区", "销售额"], preview.columns
+            assert len(preview.rows) == 4, "样例表 4 行应全部展示（少于 PREVIEW_ROWS）"
+            assert preview.rows[0] == ["A01", "华东", "1200"], preview.rows[0]
+            # 空白修复不变量：表格区高度与内容请求高度一致（±2px 内，无空白带）
+            ok = _wait_until(
+                root,
+                lambda: abs(preview._table_frame.winfo_height() -
+                            preview._table_frame.winfo_reqheight()) <= 2,
+                timeout_ms=1000)
+            assert ok, "表格区不应有多余空白"
+            preview.close()
+            root.update()
+            print("[OK] 预览：表格展示工作表前几行数据（无索引列、无空白带）")
+
             # 2. 切换 4 个页面（验证侧边栏导航）
             for i in range(4):
                 app._show_page(i)
@@ -326,6 +344,40 @@ def main() -> int:
             app.pages[2].set_query("销售额 > 0")
             app.on_apply_filter()  # 应弹提示而非崩溃
             print("[OK] 未匹配时过滤被正确拦截")
+
+            # 7b. 导入自动预览：开关与数量可配置
+            p3 = os.path.join(tmp, "自动预览.xlsx")
+            pd.DataFrame({"订单号": ["X1", "X2"], "值": [1, 2]}).to_excel(p3, index=False)
+            s3 = list_sheets(p3)[0]
+            p4 = os.path.join(tmp, "自动预览2.xlsx")
+            pd.DataFrame({"订单号": ["Y1"], "值": [1]}).to_excel(p4, index=False)
+            s4 = list_sheets(p4)[0]
+            preview_calls = []
+            orig_preview = app.on_preview_source
+            app.on_preview_source = lambda *a, **k: preview_calls.append(a)  # type: ignore[assignment]
+            try:
+                # 默认 auto_show=true、count=1：只弹首个新数据源
+                app._add_sources([(p3, s3)])
+                assert preview_calls == [(p3, s3)], "默认应自动预览首个新数据源"
+                app.on_remove_source(p3, s3)
+                preview_calls.clear()
+                # auto_show=false：不自动预览
+                config.PREVIEW_AUTO_SHOW = False
+                app._add_sources([(p3, s3)])
+                assert preview_calls == [], "auto_show=false 时不应自动预览"
+                app.on_remove_source(p3, s3)
+                preview_calls.clear()
+                # count=2 + 两个新数据源：弹 2 个（首个模态，其余级联）
+                config.PREVIEW_AUTO_SHOW = True
+                config.PREVIEW_AUTO_SHOW_COUNT = 2
+                app._add_sources([(p3, s3), (p4, s4)])
+                assert preview_calls == [(p3, s3), (p4, s4)], "数量可配：应弹 2 个"
+                app.on_remove_source(p3, s3)
+                app.on_remove_source(p4, s4)
+            finally:
+                app.on_preview_source = orig_preview
+            root.update()
+            print("[OK] 导入自动预览：开关与数量可配置")
 
             # 8. 工作表多选对话框：按文件分组层级 + 勾选语义 + 全选/全不选
             from app.sheet_dialog import SheetPickerDialog

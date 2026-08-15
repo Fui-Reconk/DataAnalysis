@@ -103,3 +103,10 @@ SHEET_PICKER_HEIGHT = _cfg.getint("dialog", "sheet_picker_height", fallback=460)
 FILE_ROW_TEXT_COLOR = _pair("file_list", "text_color", ("#1A1A1A", "#F2F2F2"))
 FILE_ROW_SUBTEXT_COLOR = _pair("file_list", "subtext_color", ("#5A6472", "#AEB6C2"))
 FILE_ROW_HOVER_COLOR = _pair("file_list", "hover_color", ("#D5DCE4", "#39424F"))
+
+# ---------- 数据预览 ----------
+PREVIEW_ROWS = _cfg.getint("preview", "rows", fallback=50)
+PREVIEW_WIDTH = _cfg.getint("preview", "dialog_width", fallback=680)
+PREVIEW_HEIGHT = _cfg.getint("preview", "dialog_height", fallback=480)
+PREVIEW_AUTO_SHOW = _cfg.getboolean("preview", "auto_show", fallback=True)
+PREVIEW_AUTO_SHOW_COUNT = _cfg.getint("preview", "auto_show_count", fallback=1)

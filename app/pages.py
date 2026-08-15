@@ -114,6 +114,7 @@ class FilePage(ctk.CTkFrame):
         menu.add_command(label="打开", command=lambda: self.app.on_open_source(path, sheet))
         menu.add_command(label="在文件夹中显示",
                          command=lambda: self.app.on_show_in_folder(path, sheet))
+        menu.add_command(label="预览", command=lambda: self.app.on_preview_source(path, sheet))
         menu.add_separator()
 
         # 选中状态复选：显示当前是否已选中
