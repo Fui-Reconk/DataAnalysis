@@ -107,7 +107,10 @@ class PreviewDialog(ctk.CTkToplevel):
         tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
 
         tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
+        # 纵向滚动条跨两行（盖住右下角）：横向滚动条只占树的宽度，
+        # 避免 columnspan 跨列在列边界产生渲染接缝（看起来像两条
+        # 横向滚动条中间隔空白）
+        vsb.grid(row=0, column=1, rowspan=2, sticky="ns")
         hsb.grid(row=1, column=0, sticky="ew")
 
         self._apply_tree_style(tree, row_h)
@@ -135,16 +138,33 @@ class PreviewDialog(ctk.CTkToplevel):
         ctk.CTkButton(bar, text="关闭", width=88, font=config.FONT_BODY,
                       command=self.close).grid(row=0, column=1, sticky="e")
 
-        # 精确收窗（wm geometry 物理像素）：chrome 为非表格区高度（全尺寸
-        # 下测量，物理），目标 = chrome + 表格内容请求高度（物理），一次性
-        # 设置后最后一行与横向滚动条严丝合缝，无空白带；与缩放推断无关
+        # 精确收窗（wm geometry 物理像素）：直接按"全部内容的请求高度"
+        # 设定初始尺寸——winfo_reqheight 不依赖窗口映射即可精确计算，
+        # 首帧即正确大小，不会出现"先小一圈再恢复"的跳动。
+        self._w_phys = w_phys
+        self._fit_x = x
+        self._center_y = my + mh // 2
+        self._shift_y = shift[1]
         self.update_idletasks()
-        chrome_phys = self.winfo_height() - table_frame.winfo_height()
-        target_phys = chrome_phys + table_frame.winfo_reqheight()
-        if target_phys < self.winfo_height() - 1:
-            new_y = max(my + (mh - target_phys) // 2 + shift[1], 0)
-            self.wm_geometry(f"{w_phys}x{max(target_phys, 160)}+{x}+{new_y}")
-            self.update_idletasks()
+        natural_phys = self.winfo_reqheight()
+        target_phys = min(max(natural_phys, 160), round(config.PREVIEW_HEIGHT * self._scale))
+        if target_phys < h_phys - 1:
+            new_y = max(self._center_y - target_phys // 2 + self._shift_y, 0)
+            self.wm_geometry(f"{w_phys}x{target_phys}+{self._fit_x}+{new_y}")
+        # 映射后再校正一次：请求尺寸在极端布局时序下可能略有偏差，
+        # 实测偏差 >2px 再修正（此时窗口已映射，测量可靠）
+        self.after(10, self._correct_height)
+
+    def _correct_height(self) -> None:
+        """映射后校正：若布局稳定后高度仍有偏差则再次收窗，避免错位。"""
+        if not self.winfo_exists():
+            return
+        self.update_idletasks()
+        chrome_phys = self.winfo_height() - self._table_frame.winfo_height()
+        target_phys = chrome_phys + self._table_frame.winfo_reqheight()
+        if abs(target_phys - self.winfo_height()) > 2:
+            new_y = max(self._center_y - target_phys // 2 + self._shift_y, 0)
+            self.wm_geometry(f"{self._w_phys}x{max(target_phys, 160)}+{self._fit_x}+{new_y}")
 
         # 置前并聚焦 + 瞬时置顶保险：Windows 上前台锁定或父窗口销毁时的
         # 激活竞争会盖掉 focus_force（表现为预览"出现即跑到后面"），短暂
