@@ -140,6 +140,44 @@ def main() -> int:
     _assert(pd.isna(ms_merged[ms_merged["订单号"] == "A03"]["数量"].iloc[0]),
             "A03 无明细 → NaN（符合左连接语义）")
 
+    print("=== 8. DBF 格式支持 ===")
+    import dbf as dbf_lib
+    dbf_path = os.path.join(tmp, "明细.dbf")
+    t = dbf_lib.Table(dbf_path, "订单号 C(10); 数量 N(10,0)", codepage="cp936")
+    t.open(dbf_lib.READ_WRITE)
+    for rec in [("A01", 10), ("A02", 5), ("A03", 20)]:
+        t.append(tuple(rec))
+    t.pack()
+    t.close()
+    _assert(list_sheets(dbf_path) == ["明细"], "DBF 无工作表，以文件名（去扩展名）作表名")
+    dbf_df = load_excel(dbf_path)
+    _assert(list(dbf_df.columns) == ["订单号", "数量"] and len(dbf_df) == 3,
+            "DBF 读取为 DataFrame，列名/行数正确")
+    _assert(dbf_df.iloc[0]["订单号"] == "A01" and int(dbf_df.iloc[0]["数量"]) == 10,
+            "DBF 中文（GBK）与数值读取正确")
+    # 无语言驱动的中文 DBF（头字节 0x00，被识别为 ascii）→ 应回退 GBK 成功
+    broken = os.path.join(tmp, "无编码头.dbf")
+    tb = dbf_lib.Table(broken, "订单号 C(10); 地区 C(10)", codepage="cp936")
+    tb.open(dbf_lib.READ_WRITE)
+    for row2 in [("A01", "华东"), ("A02", "华北")]:
+        tb.append(tuple(row2))
+    tb.pack()
+    tb.close()
+    with open(broken, "r+b") as f:
+        f.seek(29)
+        f.write(b"\x00")  # 语言驱动字节置 0
+    broken_df = load_excel(broken)
+    _assert(broken_df.iloc[0]["地区"] == "华东",
+            "无语言驱动的中文 DBF 回退 GBK 读取正确")
+    # DBF 与 xlsx 混合左连接（基准为 xlsx，明细为 DBF）
+    base_src = sources[0]
+    dbf_src = (dbf_path, "明细")
+    mix_sources = [base_src, dbf_src]
+    mix_data = {base_src: dataframes[base_src], dbf_src: dbf_df}
+    mix_merged = left_join(mix_data, mix_sources, "订单号")
+    _assert(len(mix_merged) == 4 and "数量" in mix_merged.columns,
+            f"xlsx+DBF 混合左连接成功：{len(mix_merged)} 行")
+
     print("\n=== 全部功能测试通过 ===")
     return 0
 

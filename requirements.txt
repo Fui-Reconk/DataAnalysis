@@ -5,3 +5,5 @@ pandas==2.3.3
 openpyxl==3.1.5
 customtkinter==5.2.2
 xlrd==2.0.2        # 用于读取旧版 .xls 格式
+dbfread==2.0.7     # 用于读取 DBF 格式（自动识别编码，中文 GBK 兼容）
+dbf==0.99.11       # 用于生成/处理 DBF（测试造数与后续写入场景）
