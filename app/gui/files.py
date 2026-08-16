@@ -12,7 +12,7 @@ import os
 from tkinter import filedialog, messagebox
 
 from app import config
-from app.data_loader import list_sheets, load_excel, rename_columns_abbr, scan_columns
+from app.data_loader import list_sheets, load_excel, rename_columns_abbr
 from app.gui.base import AppBase
 from app.logger import logger
 from app.preview_dialog import PreviewDialog, format_cell
@@ -92,6 +92,15 @@ class FileOpsMixin(AppBase):
         if df is None:
             messagebox.showwarning("提示", "该数据源尚未加载，无法预览。")
             return None
+        return self._open_preview(f"预览：{os.path.basename(path)} [{sheet}]", df, shift=shift)
+
+    def _open_preview(self, title: str, df, shift: tuple = (0, 0)):
+        """打开任意 DataFrame 的预览弹窗（非模态、自动适应高度）。
+
+        供工作表预览与匹配结果预览共用；df 为 None 时返回 None。
+        """
+        if df is None:
+            return None
         head = df.head(config.PREVIEW_ROWS)
         columns = [str(c) for c in head.columns]
         rows = [
@@ -101,8 +110,7 @@ class FileOpsMixin(AppBase):
         info = f"共 {len(df)} 行 × {len(df.columns)} 列，显示前 {min(config.PREVIEW_ROWS, len(df))} 行"
         # 显示缩放倍率：与浮层同源（侧边栏物理/逻辑宽度比），已验证可靠
         scale = float(self.sidebar._apply_widget_scaling(1.0))
-        return PreviewDialog(self.root, f"预览：{os.path.basename(path)} [{sheet}]",
-                             columns, rows, info, shift=shift, scale=scale)
+        return PreviewDialog(self.root, title, columns, rows, info, shift=shift, scale=scale)
 
     def on_open_source(self, path: str) -> None:
         """用系统默认程序（Office / WPS 等）打开指定文件。"""
@@ -318,19 +326,19 @@ class FileOpsMixin(AppBase):
 
     def _after_files_changed(self, status_text: str) -> None:
         """数据源集合变化后的统一刷新流程。"""
-        self._rescan_columns()
         self._invalidate_result()
         self.pages[0].refresh()
         self._refresh_match_page()
         self.set_status(status_text)
 
-    def _rescan_columns(self) -> None:
-        """重新扫描全部数据源的表头并集。"""
-        self.state.column_union = scan_columns(self.state.sources, self.state.dataframes)
-
     def _refresh_match_page(self) -> None:
-        """刷新匹配页主键下拉框。"""
-        self.pages[1].update_columns(self.state.column_union)
+        """刷新匹配页主键下拉框：只列出基准表（第一个数据源）的列。"""
+        base_cols: list = []
+        if self.state.sources:
+            df = self.state.dataframes.get(self.state.sources[0])
+            if df is not None:
+                base_cols = [str(c) for c in df.columns]
+        self.pages[1].update_columns(base_cols)
 
     def _invalidate_result(self) -> None:
         """数据源集合变化时，使旧的匹配/过滤结果失效并清空相关提示。"""

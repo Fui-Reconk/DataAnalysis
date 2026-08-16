@@ -200,6 +200,8 @@ def main() -> int:
             f"缩写列替换为全称: {list(renamed.columns)}")
     _assert(app_config.PREVIEW_AUTO_AFTER_REPLACE is True,
             "替换完成后自动预览开关已从 cfg 读取（auto_show_after_replace=true）")
+    _assert(app_config.PREVIEW_AUTO_AFTER_MERGE is True,
+            "匹配完成后自动预览开关已从 cfg 读取（auto_show_after_merge=true）")
 
     print("\n=== 全部功能测试通过 ===")
     return 0

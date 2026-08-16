@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from tkinter import filedialog, messagebox
 
+from app import config
 from app.exporter import default_export_name, export_excel
 from app.filter_engine import apply_query
 from app.gui.base import AppBase
@@ -51,6 +52,9 @@ class OperationsMixin(AppBase):
             f"主键「{key}」；重复列名已按数据源序号加后缀区分。")
         self.pages[2].show_info(f"当前数据：{rows} 行 × {cols} 列（匹配后全量数据）")
         self.set_status("匹配完成，可进行过滤或导出。")
+        # 匹配完成后按配置自动弹出结果预览，便于核对合并后的列与行数
+        if config.PREVIEW_AUTO_AFTER_MERGE:
+            self._open_preview("预览：匹配结果", merged)
 
     def on_apply_filter(self) -> None:
         """对合并结果应用用户输入的条件过滤。"""

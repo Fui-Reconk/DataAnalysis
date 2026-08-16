@@ -314,7 +314,7 @@ class MatchPage(ctk.CTkFrame):
         self.info_label.grid(row=4, column=0, sticky="w", padx=20, pady=6)
 
     def update_columns(self, columns: list) -> None:
-        """刷新主键下拉框候选（表头并集）。"""
+        """刷新主键下拉框候选（基准表的列）。"""
         self.key_combo.configure(values=list(columns))
         self.key_combo.set("")
 

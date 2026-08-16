@@ -87,6 +87,9 @@ class AppBase:
     def _bind_nav_hover_events(self, widget) -> None:
         raise NotImplementedError  # 实际由 OverlayMixin 实现
 
+    def _open_preview(self, title: str, df, shift: tuple = (0, 0)):
+        raise NotImplementedError  # 实际由 FileOpsMixin 实现
+
     def _build_overlay(self) -> None:
         raise NotImplementedError  # 实际由 OverlayMixin 实现
 

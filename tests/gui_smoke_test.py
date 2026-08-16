@@ -209,7 +209,6 @@ def main() -> int:
                 app.state.sources.append((p, sheet))
                 app.state.dataframes[(p, sheet)] = load_excel(p, sheet)
                 app.state.staged_files[p] = list_sheets(p)
-            app._rescan_columns()
             app._invalidate_result()
             app.pages[0].refresh()
             app._refresh_match_page()
@@ -243,6 +242,10 @@ def main() -> int:
             app.on_set_base()
             root.update()
             assert app.state.sources[0] == second_src, "单选设为基准表应移到首位"
+            # 匹配页主键下拉框应只列基准表的列（设为基准表后随之切换）
+            second_cols = [str(c) for c in app.state.dataframes[second_src].columns]
+            assert app.pages[1].key_combo.cget("values") == second_cols, \
+                "主键下拉框应只列基准表的列（跟随基准表切换）"
             file_page._select_all()
             app.on_set_base()
             root.update()
@@ -252,7 +255,10 @@ def main() -> int:
             app.on_set_base()
             root.update()
             assert app.state.sources[0] == first_src, "基准表应恢复为第一个数据源"
-            print("[OK] 设为基准表：单选生效、多选无效")
+            first_cols = [str(c) for c in app.state.dataframes[first_src].columns]
+            assert app.pages[1].key_combo.cget("values") == first_cols, \
+                "基准表恢复后下拉框应只列其列"
+            print("[OK] 设为基准表：单选生效、多选无效；主键下拉框只列基准表列")
 
             # 1d. 行右键菜单绑定：整行（框/名称/路径小字）均注册 Button-3
             # 注：CTk 组件 bind 为追加语义，查询需走底层 _canvas
@@ -434,12 +440,33 @@ def main() -> int:
                 root.update()
             print("[OK] 4 个页面切换正常")
 
-            # 3. 选择主键并执行匹配
-            assert "订单号" in app.state.column_union, "主键应出现在下拉框中"
+            # 3. 选择主键并执行匹配（匹配完成后按配置自动弹出结果预览）
+            base_cols = [str(c) for c in app.state.dataframes[app.state.sources[0]].columns]
+            assert "订单号" in base_cols, "基准表列应出现在主键下拉框中"
+            assert set(app.pages[1].key_combo.cget("values")) == set(base_cols), \
+                "主键下拉框应只含基准表的列（不含其它表独有列）"
             app.pages[1].key_combo.set("订单号")
-            app.on_execute_merge()
-            assert app.state.merged_df is not None and len(app.state.merged_df) == 4
-            print(f"[OK] 执行匹配：合并后 {len(app.state.merged_df)} 行")
+            merge_previews = []
+            orig_open_preview = app._open_preview
+            app._open_preview = lambda *a, **k: merge_previews.append(a)  # type: ignore[assignment]
+            try:
+                app.on_execute_merge()
+                assert app.state.merged_df is not None and len(app.state.merged_df) == 4
+                assert merge_previews and merge_previews[0][0] == "预览：匹配结果", \
+                    "匹配完成后应自动弹出结果预览"
+                assert len(merge_previews[0][1]) == 4, "预览内容应为合并结果"
+                # 开关关闭时不自动预览
+                merge_previews.clear()
+                config.PREVIEW_AUTO_AFTER_MERGE = False
+                app.state.merged_df = None
+                app.state.filtered_df = None
+                app.on_execute_merge()
+                assert app.state.merged_df is not None and len(app.state.merged_df) == 4
+                assert merge_previews == [], "auto_show_after_merge=false 时不自动预览"
+            finally:
+                app._open_preview = orig_open_preview
+                config.PREVIEW_AUTO_AFTER_MERGE = True
+            print(f"[OK] 执行匹配：合并后 {len(app.state.merged_df)} 行；完成后自动预览开关可配")
 
             # 4. 应用过滤
             app.pages[2].set_query("销售额 > 1000")

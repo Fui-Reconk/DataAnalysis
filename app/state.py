@@ -22,8 +22,6 @@ class AppState:
     # 文件只要添加过任意工作表即进入暂存池，之后可随时直接添加其
     # 其它工作表，无需再次选择文件。
     staged_files: dict = field(default_factory=dict)
-    # 全部表头的列名并集（按首次出现顺序）
-    column_union: list = field(default_factory=list)
     # 用户选择的唯一标识项（匹配主键）
     key_column: Optional[str] = None
     # 左连接合并后的结果表
