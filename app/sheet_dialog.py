@@ -12,7 +12,7 @@ from app import config
 
 
 class SheetPickerDialog(ctk.CTkToplevel):
-    """复选对话框（模态）。"""
+    """复选对话框（非模态、不抢前台，策略同预览弹窗）。"""
 
     def __init__(self, master, title: str, options: list, on_confirm,
                  default_checked: bool = True, checked_keys: set | None = None,
@@ -32,10 +32,13 @@ class SheetPickerDialog(ctk.CTkToplevel):
 
         self.title(title)
         self.resizable(False, False)
-        self.transient(master)
-        self.grab_set()  # 模态：阻止操作主窗口
-        # 不设 -topmost：模态 grab 已保证交互，置顶反而会让对话框
-        # 永远压在其他应用上层；打开时 lift 一次置于主窗口之上即可
+        # 非模态 + 普通无主窗口（与预览弹窗同策略，不抢前台）：
+        #  - 不用 transient / grab_set：模态全局抓取在 Windows 上会把
+        #    输入强制路由回本窗口，表现为「一直抢前台」（点主窗口也被
+        #    拉回、无法操作其它应用）；
+        #  - 打开时 lift+focus_force 置前，再瞬时置顶 150ms 越过激活
+        #    竞争，随后释放恢复普通层级，主窗口与对话框可自由切换；
+        #  - 代价：对话框出现在任务栏/Alt-Tab（可用任务栏管理）
 
         # 居中于主窗口
         master.update_idletasks()
@@ -97,7 +100,21 @@ class SheetPickerDialog(ctk.CTkToplevel):
         ctk.CTkButton(bar, text="确定", width=72, font=config.FONT_BODY,
                       command=self._on_ok).grid(row=0, column=4, padx=4)
 
-        self.lift()  # 打开时置于主窗口之上（不设置顶，避免压住其它应用）
+        self.lift()  # 打开时置于主窗口之上
+        self.focus_force()
+        self.after(30, self._ensure_on_top)
+
+    def _ensure_on_top(self) -> None:
+        """瞬时置顶 150ms 越过前台竞争，随后释放恢复普通层级（同预览弹窗）。"""
+        if not self.winfo_exists():
+            return
+        self.lift()
+        self.attributes("-topmost", True)
+        self.after(150, self._release_topmost)
+
+    def _release_topmost(self) -> None:
+        if self.winfo_exists():
+            self.attributes("-topmost", False)
 
     # ---- 交互 ----
     def _select_all(self) -> None:
