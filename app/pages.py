@@ -179,6 +179,10 @@ class FilePage(ctk.CTkFrame):
                          command=lambda: self.app.on_set_base(targets))
         menu.add_command(label=item_label("重载工作表"),
                          command=lambda: self.app.on_reload_sources(targets))
+        # 列名缩写替换（映射见 config.cfg [column_map]）
+        if config.COLUMN_ABBR_MAP:
+            menu.add_command(label=item_label("替换缩写"),
+                             command=lambda: self.app.on_replace_abbr(targets))
         menu.add_separator()
 
         menu.add_command(label=item_label("移除"),

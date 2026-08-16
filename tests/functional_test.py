@@ -55,7 +55,7 @@ def _assert(cond: bool, msg: str) -> None:
 
 def main() -> int:
     # app 包依赖上面的项目根目录路径引导，故延迟到函数内导入
-    from app.data_loader import list_sheets, load_excel, scan_columns
+    from app.data_loader import list_sheets, load_excel, rename_columns_abbr, scan_columns
     from app.merge_engine import left_join
     from app.filter_engine import apply_query
     from app.stats import calculate_default_stats
@@ -188,6 +188,18 @@ def main() -> int:
         content = f.read()
     _assert("__log_test__" in content and "[INFO]" in content,
             f"日志写入 {LOG_FILE} 成功")
+
+    print("=== 10. 列名缩写替换 ===")
+    from app import config as app_config
+    mapping = app_config.COLUMN_ABBR_MAP
+    _assert(mapping.get("xm") == "姓名" and mapping.get("zkzh") == "准考证号"
+            and len(mapping) >= 30, f"缩写映射表已从 cfg 加载（{len(mapping)} 项）")
+    abbr_df = pd.DataFrame({"nd": [2025], "xm": ["张三"], "other": [1]})
+    renamed = rename_columns_abbr(abbr_df, mapping)
+    _assert(list(renamed.columns) == ["年度", "姓名", "other"],
+            f"缩写列替换为全称: {list(renamed.columns)}")
+    _assert(app_config.PREVIEW_AUTO_AFTER_REPLACE is True,
+            "替换完成后自动预览开关已从 cfg 读取（auto_show_after_replace=true）")
 
     print("\n=== 全部功能测试通过 ===")
     return 0

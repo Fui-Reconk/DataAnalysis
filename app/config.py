@@ -110,6 +110,7 @@ PREVIEW_WIDTH = _cfg.getint("preview", "dialog_width", fallback=680)
 PREVIEW_HEIGHT = _cfg.getint("preview", "dialog_height", fallback=480)
 PREVIEW_AUTO_SHOW = _cfg.getboolean("preview", "auto_show", fallback=True)
 PREVIEW_AUTO_SHOW_COUNT = _cfg.getint("preview", "auto_show_count", fallback=1)
+PREVIEW_AUTO_AFTER_REPLACE = _cfg.getboolean("preview", "auto_show_after_replace", fallback=True)
 
 # ---------- 右键菜单批量操作确认 ----------
 MENU_CONFIRM_THRESHOLD = _cfg.getint("context_menu", "multi_confirm_threshold", fallback=5)
@@ -119,3 +120,8 @@ MENU_FOLDER_CONFIRM_THRESHOLD = _cfg.getint(
 # ---------- 日志 ----------
 LOG_ENABLED = _cfg.getboolean("log", "enabled", fallback=True)
 LOG_LEVEL = _cfg.get("log", "level", fallback="INFO")
+
+# ---------- 列名缩写映射（右键「替换缩写」） ----------
+COLUMN_ABBR_MAP: dict = {}
+if _cfg.has_section("column_map"):
+    COLUMN_ABBR_MAP = dict(_cfg.items("column_map"))

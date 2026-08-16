@@ -64,6 +64,18 @@ def load_excel(path: str, sheet: object = 0) -> pd.DataFrame:
     return pd.read_excel(path, sheet_name=sheet)
 
 
+def rename_columns_abbr(df: pd.DataFrame, mapping: dict) -> pd.DataFrame:
+    """将 DataFrame 列名按缩写映射表替换为中文全称（未命中保持原样）。
+
+    mapping 为 {缩写: 全称}，取自 config.cfg [column_map]。
+    匹配大小写不敏感（DBF 字段名通常为大写）。
+    """
+    if not mapping:
+        return df.copy()
+    low_map = {k.lower(): v for k, v in mapping.items()}
+    return df.rename(columns=lambda c: low_map.get(str(c).lower(), str(c)))
+
+
 def scan_columns(sources: List[tuple], dataframes: Dict[tuple, pd.DataFrame]) -> List[str]:
     """扫描所有已加载数据源的表头，返回列名并集。
 

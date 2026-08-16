@@ -12,7 +12,7 @@ import os
 from tkinter import filedialog, messagebox
 
 from app import config
-from app.data_loader import list_sheets, load_excel, scan_columns
+from app.data_loader import list_sheets, load_excel, rename_columns_abbr, scan_columns
 from app.gui.base import AppBase
 from app.logger import logger
 from app.preview_dialog import PreviewDialog, format_cell
@@ -217,6 +217,38 @@ class FileOpsMixin(AppBase):
             return
         for path, sheet in selected:
             self.on_reload_source(path, sheet)
+
+    def on_replace_abbr(self, targets: list | None = None) -> None:
+        """将目标工作表列名中的拼音缩写替换为中文全称（映射见 config.cfg [column_map]）。
+
+        替换完成后按配置（[preview] auto_show_after_replace）自动弹出预览，
+        便于确认新列名；数量与导入后自动预览一致（auto_show_count），级联排列。
+        """
+        if not config.COLUMN_ABBR_MAP:
+            messagebox.showinfo("提示", "config.cfg 中未配置 [column_map] 缩写映射。")
+            return
+        selected = self.pages[0].selected_sources if targets is None else targets
+        if not selected:
+            messagebox.showinfo("提示", "请先选择要替换列名的工作表。")
+            return
+        replaced_sources = []
+        for path, sheet in selected:
+            df = self.state.dataframes.get((path, sheet))
+            if df is None:
+                continue
+            new_df = rename_columns_abbr(df, config.COLUMN_ABBR_MAP)
+            if list(new_df.columns) != list(df.columns):
+                self.state.dataframes[(path, sheet)] = new_df
+                replaced_sources.append((path, sheet))
+        if replaced_sources:
+            self._after_files_changed(f"已替换 {len(replaced_sources)} 个工作表的列名缩写。")
+            # 替换后自动弹出预览（全部非模态、级联排列），方便确认新列名
+            if config.PREVIEW_AUTO_AFTER_REPLACE:
+                count = max(1, min(config.PREVIEW_AUTO_SHOW_COUNT, len(replaced_sources)))
+                for i, src in enumerate(replaced_sources[:count]):
+                    self.on_preview_source(*src, shift=(i * 24, i * 24))
+        else:
+            self.set_status("未发现可替换的缩写列名。")
 
     def _add_sources(self, selected) -> None:
         """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。
