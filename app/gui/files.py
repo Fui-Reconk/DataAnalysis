@@ -14,6 +14,7 @@ from tkinter import filedialog, messagebox
 from app import config
 from app.data_loader import list_sheets, load_excel, scan_columns
 from app.gui.base import AppBase
+from app.logger import logger
 from app.preview_dialog import PreviewDialog, format_cell
 from app.sheet_dialog import SheetPickerDialog
 from app.system_utils import open_with_system, show_in_folder
@@ -37,6 +38,7 @@ class FileOpsMixin(AppBase):
             try:
                 self.state.staged_files[path] = list_sheets(path)
             except Exception as exc:  # 读取失败需逐个提示并跳过（BLE001 见 .flake8）
+                logger.warning("读取文件失败：%s - %s", path, exc)
                 failed.append((path, str(exc)))
 
         # 本次选择文件的所有未添加工作表（含单工作表文件，统一下一步处理）
@@ -107,6 +109,7 @@ class FileOpsMixin(AppBase):
         try:
             open_with_system(path)
         except Exception as exc:  # 打开失败需提示（BLE001 见 .flake8）
+            logger.error("打开文件失败：%s - %s", path, exc, exc_info=True)
             messagebox.showerror(
                 "打开失败", f"无法用系统默认程序打开文件：\n{path}\n\n{exc}")
 
@@ -115,6 +118,7 @@ class FileOpsMixin(AppBase):
         try:
             show_in_folder(path)
         except Exception as exc:  # 定位失败需提示（BLE001 见 .flake8）
+            logger.error("定位文件失败：%s - %s", path, exc, exc_info=True)
             messagebox.showerror(
                 "定位失败", f"无法在文件管理器中定位文件：\n{path}\n\n{exc}")
 
@@ -126,6 +130,7 @@ class FileOpsMixin(AppBase):
         try:
             df = load_excel(path, sheet)
         except Exception as exc:  # 重读失败需提示（BLE001 见 .flake8）
+            logger.error("重载数据源失败：%s[%s]", path, sheet, exc_info=True)
             messagebox.showerror(
                 "重新读取失败",
                 f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")
@@ -232,6 +237,7 @@ class FileOpsMixin(AppBase):
                 try:
                     df = load_excel(path, sheet)
                 except Exception as exc:  # 单个工作表读取失败不影响其它表（BLE001 见 .flake8）
+                    logger.error("读取数据源失败：%s[%s]", path, sheet, exc_info=True)
                     messagebox.showerror(
                         "读取失败",
                         f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")

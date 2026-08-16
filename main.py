@@ -11,10 +11,12 @@ import customtkinter as ctk
 
 from app import config
 from app.gui import DataMatcherApp
+from app.logger import logger
 
 
 def main() -> None:
     """设置外观主题并启动主界面。"""
+    logger.info("应用启动：%s", config.APP_TITLE)
     # 外观模式：跟随系统；主题色：蓝色
     ctk.set_appearance_mode(config.APPEARANCE_MODE)
     ctk.set_default_color_theme(config.COLOR_THEME)

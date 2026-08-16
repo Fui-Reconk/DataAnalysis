@@ -115,3 +115,7 @@ PREVIEW_AUTO_SHOW_COUNT = _cfg.getint("preview", "auto_show_count", fallback=1)
 MENU_CONFIRM_THRESHOLD = _cfg.getint("context_menu", "multi_confirm_threshold", fallback=5)
 MENU_FOLDER_CONFIRM_THRESHOLD = _cfg.getint(
     "context_menu", "folder_confirm_threshold", fallback=MENU_CONFIRM_THRESHOLD)
+
+# ---------- 日志 ----------
+LOG_ENABLED = _cfg.getboolean("log", "enabled", fallback=True)
+LOG_LEVEL = _cfg.get("log", "level", fallback="INFO")

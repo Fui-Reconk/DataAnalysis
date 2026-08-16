@@ -10,6 +10,7 @@ from tkinter import filedialog, messagebox
 from app.exporter import default_export_name, export_excel
 from app.filter_engine import apply_query
 from app.gui.base import AppBase
+from app.logger import logger
 from app.merge_engine import left_join
 from app.stats import calculate_default_stats
 
@@ -35,6 +36,7 @@ class OperationsMixin(AppBase):
             try:
                 merged = left_join(self.state.dataframes, self.state.sources, key)
             except (ValueError, KeyError) as exc:
+                logger.warning("匹配失败：%s", exc)
                 messagebox.showerror("匹配失败", str(exc))
                 return
             self.state.merged_df = merged
@@ -67,6 +69,7 @@ class OperationsMixin(AppBase):
             try:
                 result = apply_query(self.state.merged_df, query)
             except Exception as exc:  # 过滤语法错误需弹窗提示，不崩溃（BLE001 见 .flake8）
+                logger.error("过滤失败：%s", exc, exc_info=True)
                 messagebox.showerror("过滤失败", f"过滤语句解析失败：\n{exc}\n\n请检查字段名与语法。")
                 return
             self.state.filtered_df = result
@@ -104,6 +107,7 @@ class OperationsMixin(AppBase):
             try:
                 stats_df = calculate_default_stats(data_df)
             except Exception as exc:  # 统计逻辑由用户编写，出错需兜底（BLE001 见 .flake8）
+                logger.error("统计计算失败：%s", exc, exc_info=True)
                 messagebox.showerror("统计计算失败", f"calculate_default_stats 执行出错：\n{exc}")
                 stats_df = None
         finally:
@@ -124,6 +128,7 @@ class OperationsMixin(AppBase):
             try:
                 out_path = export_excel(data_df, stats_df, path)  # type: ignore
             except Exception as exc:  # 写入失败需弹窗提示（BLE001 见 .flake8）
+                logger.error("导出失败：%s - %s", path, exc, exc_info=True)
                 messagebox.showerror("导出失败", f"写入文件失败：\n{exc}")
                 return
         finally:

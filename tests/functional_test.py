@@ -178,6 +178,17 @@ def main() -> int:
     _assert(len(mix_merged) == 4 and "数量" in mix_merged.columns,
             f"xlsx+DBF 混合左连接成功：{len(mix_merged)} 行")
 
+    print("=== 9. 日志 ===")
+    from app.logger import get_logger, LOG_FILE
+    app_logger = get_logger()
+    app_logger.info("__log_test__")
+    for handler in app_logger.handlers:
+        handler.flush()
+    with open(LOG_FILE, encoding="utf-8") as f:
+        content = f.read()
+    _assert("__log_test__" in content and "[INFO]" in content,
+            f"日志写入 {LOG_FILE} 成功")
+
     print("\n=== 全部功能测试通过 ===")
     return 0
 
