@@ -12,6 +12,8 @@ from typing import TYPE_CHECKING
 import customtkinter as ctk
 
 from app import config
+from app.filter_engine import OPS as FILTER_OPS
+from app.filter_engine import VALUE_OPS
 
 if TYPE_CHECKING:
     from app.gui import DataMatcherApp
@@ -327,26 +329,41 @@ class MatchPage(ctk.CTkFrame):
 
 
 class FilterPage(ctk.CTkFrame):
-    """过滤筛选区：输入 pandas 查询语句动态过滤。"""
+    """过滤筛选区：按「列名 + 条件 + 比较值」条件行过滤。
+
+    每行一个条件组（三个控件同一行），可自由增删，默认一行；
+    多组条件之间为「并且（AND）」关系。列名候选来自合并结果。
+    """
 
     def __init__(self, master, app: "DataMatcherApp", **kwargs):
         super().__init__(master, **kwargs)
         self.app = app
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(2, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
         # 标题
         ctk.CTkLabel(self, text="过滤筛选", font=config.FONT_TITLE).grid(
             row=0, column=0, sticky="w", padx=20, pady=(20, 10))
 
-        # 语法说明
-        ctk.CTkLabel(self, text="Pandas 查询语句（字段名需与表头一致，字符串值需加引号），例如：\n销售额 > 1000 and 地区 == '华东'",
-                     font=config.FONT_SMALL, text_color="gray60", justify="left").grid(
-            row=1, column=0, sticky="w", padx=20, pady=(0, 8))
+        # 条件区（可滚动，每行一个条件组）
+        self.cond_scroll = ctk.CTkScrollableFrame(self, label_text="过滤条件",
+                                                  label_font=config.FONT_SMALL)
+        self.cond_scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=8)
+        self.cond_scroll.grid_columnconfigure(0, weight=1)
+        self._condition_rows: list = []
+        self._columns: list = []
+        self._hidden: set = set()  # 隐藏的列名集合（勾选对话框未勾选 = 隐藏）
 
-        # 查询输入框
-        self.query_box = ctk.CTkTextbox(self, height=90, font=config.FONT_BODY, wrap="word")
-        self.query_box.grid(row=2, column=0, sticky="nsew", padx=20, pady=8)
+        # 工具按钮行：添加条件 + 显示列管理
+        tools = ctk.CTkFrame(self, fg_color="transparent")
+        tools.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 6))
+        ctk.CTkButton(tools, text="➕ 添加条件", command=self.add_condition_row,
+                      font=config.FONT_BODY, width=130, fg_color="gray35",
+                      hover_color="gray45").pack(side="left")
+        self.column_btn = ctk.CTkButton(tools, text="☑ 显示列", width=150,
+                                        command=self.app.on_choose_visible_columns,
+                                        font=config.FONT_BODY)
+        self.column_btn.pack(side="left", padx=(10, 0))
 
         # 操作按钮
         btn_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -362,14 +379,154 @@ class FilterPage(ctk.CTkFrame):
                                        justify="left", anchor="w", wraplength=660)
         self.info_label.grid(row=4, column=0, sticky="w", padx=20, pady=6)
 
-    def get_query(self) -> str:
-        """读取查询语句。"""
-        return self.query_box.get("1.0", "end").strip()
+        self.add_condition_row()
 
-    def set_query(self, text: str) -> None:
-        """设置查询语句。"""
-        self.query_box.delete("1.0", "end")
-        self.query_box.insert("1.0", text)
+    # ---- 隐藏列（显示列）管理 ----
+
+    def available_columns(self) -> list:
+        """全部候选列（含隐藏列，用于条件行下拉框与显示列对话框）。"""
+        return list(self._columns)
+
+    def get_hidden(self) -> set:
+        """当前隐藏的列名集合。"""
+        return set(self._hidden)
+
+    def visible_columns(self) -> list:
+        """可见列（全部候选列减去隐藏列），用于过滤结果预览与导出投影。"""
+        return [c for c in self._columns if c not in self._hidden]
+
+    def set_hidden(self, hidden: set) -> None:
+        """设置隐藏列集合（自动裁掉不在候选列中的名字）并刷新按钮/下拉框。"""
+        self._hidden = {c for c in hidden if c in self._columns}
+        self._refresh_column_btn()
+        self._refresh_row_columns()
+
+    def _refresh_column_btn(self) -> None:
+        """刷新「显示列」按钮文案（显示当前隐藏列数）。"""
+        n = len(self._hidden)
+        self.column_btn.configure(text=f"☑ 显示列（隐藏 {n}）" if n else "☑ 显示列")
+
+    def _refresh_row_columns(self) -> None:
+        """刷新条件行列名下拉框候选：只列可见列，隐藏列不出现。"""
+        visible = self.visible_columns()
+        for row in self._condition_rows:
+            current = row["col_combo"].get()
+            row["col_combo"].configure(values=list(visible))
+            row["col_combo"].set(current if current in visible else "")
+
+    # ---- 条件行管理 ----
+
+    def add_condition_row(self) -> None:
+        """新增一行过滤条件（列名 + 条件 + 比较值 + 删除按钮，同一行）。"""
+        row = {}
+        frame = ctk.CTkFrame(self.cond_scroll, fg_color="transparent")
+        frame.grid(row=len(self._condition_rows), column=0, sticky="ew", pady=3)
+        for c in range(3):
+            frame.grid_columnconfigure(c, weight=1)
+        row["frame"] = frame
+
+        col_combo = ctk.CTkComboBox(frame, values=list(self._columns), state="readonly",
+                                    font=config.FONT_BODY)
+        col_combo.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+        row["col_combo"] = col_combo
+
+        op_combo = ctk.CTkComboBox(frame, values=list(FILTER_OPS), state="readonly",
+                                   font=config.FONT_BODY,
+                                   command=lambda _v, r=row: self._on_op_change(r))
+        op_combo.grid(row=0, column=1, sticky="ew", padx=(0, 8))
+        row["op_combo"] = op_combo
+
+        value_entry = ctk.CTkEntry(frame, font=config.FONT_BODY, placeholder_text="比较值")
+        value_entry.grid(row=0, column=2, sticky="ew", padx=(0, 8))
+        row["value_entry"] = value_entry
+
+        del_btn = ctk.CTkButton(frame, text="✕", width=34, font=config.FONT_BODY,
+                                fg_color="gray35", hover_color="gray55",
+                                command=lambda r=row: self.remove_condition_row(r))
+        del_btn.grid(row=0, column=3)
+        row["del_btn"] = del_btn
+
+        self._condition_rows.append(row)
+
+    def remove_condition_row(self, row: dict) -> None:
+        """删除一行条件（允许删到 0 行，应用时提示先添加）。"""
+        if row not in self._condition_rows:
+            return
+        self._condition_rows.remove(row)
+        row["frame"].destroy()
+        self._reflow_rows()
+
+    def _reflow_rows(self) -> None:
+        """删除行后重新按顺序排列剩余行。"""
+        for i, row in enumerate(self._condition_rows):
+            row["frame"].grid(row=i, column=0, sticky="ew", pady=3)
+
+    def _on_op_change(self, row: dict) -> None:
+        """条件切换为 为空/不为空 时禁用数值框（无需比较值）。"""
+        entry = row["value_entry"]
+        if row["op_combo"].get() in ("为空", "不为空"):
+            entry.configure(state="disabled")
+            entry.delete(0, "end")
+        else:
+            entry.configure(state="normal")
+
+    # ---- 与控制器交互的 API ----
+
+    def update_columns(self, columns: list) -> None:
+        """刷新候选列（合并结果列；失效时传空列表），并同步隐藏集与下拉框。"""
+        self._columns = [str(c) for c in columns]
+        self._hidden = {c for c in self._hidden if c in self._columns}
+        self._refresh_column_btn()
+        self._refresh_row_columns()
+
+    def get_conditions(self) -> list:
+        """读取全部条件；未选/非法时抛 ValueError 并指明行号。
+
+        完全空行（列名与条件均未选）跳过；选 为空/不为空 时 value 置空。
+        """
+        conditions = []
+        for i, row in enumerate(self._condition_rows, start=1):
+            col = row["col_combo"].get().strip()
+            op = row["op_combo"].get().strip()
+            if not col and not op:
+                continue  # 未使用的空行，不作为条件
+            if not col:
+                raise ValueError(f"第 {i} 行：未选择列名。")
+            if not op:
+                raise ValueError(f"第 {i} 行：未选择条件。")
+            value = row["value_entry"].get().strip()
+            if op in VALUE_OPS and not value:
+                raise ValueError(f"第 {i} 行：条件「{op}」请输入比较值。")
+            conditions.append({"column": col, "op": op, "value": value})
+        return conditions
+
+    def set_conditions(self, conditions: list) -> None:
+        """程序化填充条件（清空现有行后按列表重建；供测试与复用）。"""
+        for row in list(self._condition_rows):
+            self.remove_condition_row(row)
+        if not conditions:
+            self.add_condition_row()
+            return
+        for cond in conditions:
+            self.add_condition_row()
+            row = self._condition_rows[-1]
+            row["col_combo"].set(str(cond.get("column", "")))
+            row["op_combo"].set(str(cond.get("op", "")))
+            self._on_op_change(row)  # 为空/不为空 → 禁用数值框
+            entry = row["value_entry"]
+            disabled = entry.cget("state") == "disabled"
+            if disabled:
+                entry.configure(state="normal")
+            entry.delete(0, "end")
+            entry.insert(0, str(cond.get("value", "")))
+            if disabled:
+                entry.configure(state="disabled")
+
+    def reset_conditions(self) -> None:
+        """清空全部条件行并恢复默认一行（重置 / 数据源失效时调用）。"""
+        for row in list(self._condition_rows):
+            self.remove_condition_row(row)
+        self.add_condition_row()
 
     def show_info(self, text: str) -> None:
         self.info_label.configure(text=text)

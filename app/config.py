@@ -112,6 +112,8 @@ PREVIEW_AUTO_SHOW = _cfg.getboolean("preview", "auto_show", fallback=True)
 PREVIEW_AUTO_SHOW_COUNT = _cfg.getint("preview", "auto_show_count", fallback=1)
 PREVIEW_AUTO_AFTER_REPLACE = _cfg.getboolean("preview", "auto_show_after_replace", fallback=True)
 PREVIEW_AUTO_AFTER_MERGE = _cfg.getboolean("preview", "auto_show_after_merge", fallback=True)
+PREVIEW_AUTO_AFTER_FILTER = _cfg.getboolean("preview", "auto_show_after_filter", fallback=True)
+PREVIEW_AUTO_AFTER_COLUMNS = _cfg.getboolean("preview", "auto_show_after_columns", fallback=True)
 
 # ---------- 右键菜单批量操作确认 ----------
 MENU_CONFIRM_THRESHOLD = _cfg.getint("context_menu", "multi_confirm_threshold", fallback=5)

@@ -1,8 +1,8 @@
-"""SheetPickerDialog：工作表多选对话框。
+"""SheetPickerDialog：复选对话框。
 
-用于「添加文件」时选择要添加的工作表，以及从暂存池中
-直接添加某文件的其它工作表。选项以复选框列表呈现，
-支持全选/全不选，确定后通过回调返回选中的 key 列表。
+用于「添加文件」时选择要添加的工作表、从暂存池直接添加某文件的
+其它工作表，以及过滤页选择显示列（勾选 = 显示）。选项以复选框列表
+呈现，支持全选/全不选，确定后通过回调返回选中的 key 列表。
 """
 from __future__ import annotations
 
@@ -12,20 +12,23 @@ from app import config
 
 
 class SheetPickerDialog(ctk.CTkToplevel):
-    """工作表多选对话框（模态）。"""
+    """复选对话框（模态）。"""
 
     def __init__(self, master, title: str, options: list, on_confirm,
-                 default_checked: bool = True):
+                 default_checked: bool = True, checked_keys: set | None = None,
+                 hint_text: str = "勾选要添加的工作表："):
         """options: list[(group, key, label)]；on_confirm(keys) 在确定后回调。
 
         group 为分组标题（如文件名），非 None 时在组内选项上方渲染
         加粗分组头，形成「文件 → 工作表」的层级；None 则平铺不分组。
+        checked_keys 为默认取消勾选的 key 集合（default_checked=True 时）。
         """
         super().__init__(master)
         self._on_confirm = on_confirm
         self._vars: dict = {}
         self._checkboxes: dict = {}
         self._group_headers: dict = {}  # group -> 分组标题控件（测试用）
+        unchecked = set(checked_keys or ())
 
         self.title(title)
         self.resizable(False, False)
@@ -44,7 +47,7 @@ class SheetPickerDialog(ctk.CTkToplevel):
         self.geometry(f"{w}x{h}+{max(x, 0)}+{max(y, 0)}")
 
         # 提示 + 选项列表（可滚动）
-        hint = ctk.CTkLabel(self, text="勾选要添加的工作表：", font=config.FONT_SMALL,
+        hint = ctk.CTkLabel(self, text=hint_text, font=config.FONT_SMALL,
                             text_color=config.FILE_ROW_SUBTEXT_COLOR, anchor="w")
         hint.grid(row=0, column=0, sticky="ew", padx=16, pady=(12, 4))
 
@@ -70,7 +73,8 @@ class SheetPickerDialog(ctk.CTkToplevel):
                 # 变量与勾选框的 on/off 语义必须一致（onvalue/offvalue）：
                 # 否则视觉勾选状态与变量值脱节，会出现"点击选中却被反选"、
                 # "全选/全不选无反应"等问题
-                var = ctk.StringVar(value="on" if default_checked else "")
+                checked = default_checked and key not in unchecked
+                var = ctk.StringVar(value="on" if checked else "")
                 self._vars[key] = var
                 checkbox = ctk.CTkCheckBox(scroll, text=label, variable=var,
                                            onvalue="on", offvalue="",

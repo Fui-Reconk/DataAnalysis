@@ -71,8 +71,11 @@ def clean_redundant_columns(merged: pd.DataFrame, base: pd.DataFrame) -> tuple[p
 
     删除规则（仅作用于非基准表列，基准表自身列永不删除）：
       - 全空列：全部为 NaN / None / 空字符串（含纯空白）；
-      - 与基准表同名列（去 _N 后缀，如 姓名_2 ↔ 姓名）逐行值全相同的列
-        （NaN 视作相等）——含基准表有数据而该列全空的情形（被全空规则覆盖）。
+      - 与基准表同名列（去 _N 后缀，如 姓名_2 ↔ 姓名）且未提供任何新值的列：
+        非基准列**有值的每一行**都与基准列相同（左连接未匹配行的 NaN 无信息量，
+        不计为差异——否则未覆盖全量行的同名列会全部残留）；基准列为空而非基准
+        列有值则保留（该列含额外数据）；含基准表有数据而该列全空的情形（被全空
+        规则覆盖）。
 
     效率：按列名配对，比较次数 O(非基准列数)；数值列只做 isna 布尔扫描，
     不做字符串转换，大数据量下与合并本身同量级。
@@ -86,7 +89,7 @@ def clean_redundant_columns(merged: pd.DataFrame, base: pd.DataFrame) -> tuple[p
             drop.append(col)
             continue
         stem = _TWIN_SUFFIX.sub("", col)
-        if stem in base_cols and _values_identical(merged[col], merged[stem]):
+        if stem in base_cols and _redundant_vs_base(merged[col], merged[stem]):
             drop.append(col)
     if drop:
         merged = merged.drop(columns=drop)
@@ -108,8 +111,12 @@ def _is_all_empty(s: pd.Series) -> bool:
     return False
 
 
-def _values_identical(a: pd.Series, b: pd.Series) -> bool:
-    """两列逐行值全相同（NaN 视作相等）；按位置比较，无索引对齐开销。"""
+def _redundant_vs_base(a: pd.Series, b: pd.Series) -> bool:
+    """非基准列 a 相对基准列 b 是否冗余（a 未提供任何 b 没有的新值）。
+
+    a 有值的每一行都必须与 b 相同；a 的 NaN（左连接未匹配行）不计为差异。
+    若 b 为空而 a 有值 → 不相等，保留（a 含额外数据）。
+    """
     x = a.to_numpy()
     y = b.to_numpy()
-    return bool(((x == y) | (pd.isna(x) & pd.isna(y))).all())
+    return bool(((x == y) | pd.isna(x)).all())

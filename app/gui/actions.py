@@ -7,12 +7,15 @@ from __future__ import annotations
 
 from tkinter import filedialog, messagebox
 
+import pandas as pd
+
 from app import config
 from app.exporter import default_export_name, export_excel
-from app.filter_engine import apply_query
+from app.filter_engine import apply_conditions
 from app.gui.base import AppBase
 from app.logger import logger
 from app.merge_engine import clean_redundant_columns, left_join
+from app.sheet_dialog import SheetPickerDialog
 from app.stats import calculate_default_stats
 
 
@@ -58,6 +61,7 @@ class OperationsMixin(AppBase):
         if removed_cols:
             info_text += f"\n已自动删除 {len(removed_cols)} 个冗余列：\n{'、'.join(removed_cols)}"
         self.pages[1].show_info(info_text)
+        self.pages[2].update_columns(list(merged.columns))
         self.pages[2].show_info(f"当前数据：{rows} 行 × {cols} 列（匹配后全量数据）")
         self.set_status("匹配完成，可进行过滤或导出。")
         # 匹配完成后按配置自动弹出结果预览，便于核对合并后的列与行数
@@ -65,24 +69,28 @@ class OperationsMixin(AppBase):
             self._open_preview("预览：匹配结果", merged)
 
     def on_apply_filter(self) -> None:
-        """对合并结果应用用户输入的条件过滤。"""
+        """按条件行（列名 + 条件 + 比较值）对合并结果应用过滤。"""
         if self.state.merged_df is None:
             messagebox.showwarning("提示", "请先执行匹配，再进行过滤。")
             return
 
-        query = self.pages[2].get_query()
-        if not query:
-            messagebox.showinfo("提示", "请输入过滤条件，例如：销售额 > 1000 and 地区 == '华东'")
+        try:
+            conditions = self.pages[2].get_conditions()
+        except ValueError as exc:
+            messagebox.showwarning("过滤条件有误", str(exc))
+            return
+        if not conditions:
+            messagebox.showinfo("提示", "请至少添加一个过滤条件（可点「添加条件」增加）。")
             return
 
         self.start_progress()
         self.set_status("正在应用过滤条件…")
         try:
             try:
-                result = apply_query(self.state.merged_df, query)
-            except Exception as exc:  # 过滤语法错误需弹窗提示，不崩溃（BLE001 见 .flake8）
+                result = apply_conditions(self.state.merged_df, conditions)
+            except Exception as exc:  # 条件/数值不合法需弹窗提示，不崩溃（BLE001 见 .flake8）
                 logger.error("过滤失败：%s", exc, exc_info=True)
-                messagebox.showerror("过滤失败", f"过滤语句解析失败：\n{exc}\n\n请检查字段名与语法。")
+                messagebox.showerror("过滤失败", f"过滤条件执行失败：\n{exc}")
                 return
             self.state.filtered_df = result
         finally:
@@ -92,16 +100,78 @@ class OperationsMixin(AppBase):
         rows = len(result)
         self.pages[2].show_info(f"✔ 过滤完成：{total} 行 → {rows} 行，已过滤 {total - rows} 行。")
         self.set_status(f"过滤完成：{rows}/{total} 行。")
+        # 过滤完成后按配置自动弹出结果预览，便于核对过滤后的数据（按显示列投影）
+        if config.PREVIEW_AUTO_AFTER_FILTER:
+            self._open_preview("预览：过滤结果", self._project_visible(result))
 
     def on_reset_filter(self) -> None:
-        """重置过滤，恢复为匹配后的全量数据。"""
+        """重置过滤，恢复为匹配后的全量数据（条件清回默认一行）。"""
         if self.state.merged_df is None:
             return
         self.state.filtered_df = self.state.merged_df.copy()
-        self.pages[2].set_query("")
+        self.pages[2].reset_conditions()
         rows = len(self.state.merged_df)
         self.pages[2].show_info(f"已重置，当前为匹配后全量数据：{rows} 行。")
         self.set_status("已重置过滤。")
+
+    # ---- 显示列（隐藏列）管理 ----
+
+    def _base_column_names(self) -> set:
+        """基准表（第一个数据源）的列名集合——基准表列不可隐藏。"""
+        if not self.state.sources:
+            return set()
+        df = self.state.dataframes.get(self.state.sources[0])
+        return set(df.columns) if df is not None else set()
+
+    def _hideable_columns(self) -> list:
+        """可隐藏的列（全部候选列中除基准表列之外）。"""
+        base_cols = self._base_column_names()
+        return [c for c in self.pages[2].available_columns() if c not in base_cols]
+
+    def on_choose_visible_columns(self) -> None:
+        """打开「显示列」勾选对话框：勾选 = 显示，未勾选 = 隐藏。
+
+        基准表列不可隐藏（不在对话框中显示，始终保留）；
+        隐藏列仅影响过滤结果预览与导出（原始合并结果不变）。
+        """
+        columns = self._hideable_columns()
+        if not columns:
+            messagebox.showinfo("提示", "当前没有可隐藏的列（基准表列不可隐藏）。")
+            return
+        hidden = {c for c in self.pages[2].get_hidden() if c in columns}
+        SheetPickerDialog(
+            self.root, "选择显示列",
+            [(None, col, col) for col in columns],
+            on_confirm=self._apply_visible_columns,
+            checked_keys=hidden,
+            hint_text="勾选要显示的列（未勾选 = 隐藏；基准表列始终显示）：")
+
+    def _apply_visible_columns(self, keys) -> None:
+        """应用显示列选择（keys 为勾选显示的列；取消为 None）。"""
+        if keys is None:
+            return
+        hidden = {c for c in self._hideable_columns() if c not in keys}
+        self.pages[2].set_hidden(hidden)
+        if hidden:
+            self.set_status(f"已更新显示列：隐藏 {len(hidden)} 列。")
+        else:
+            self.set_status("已显示全部列。")
+        # 显示列调整后按配置自动弹出当前数据预览（按新显示列投影）
+        if config.PREVIEW_AUTO_AFTER_COLUMNS:
+            data = (self.state.filtered_df if self.state.filtered_df is not None
+                    else self.state.merged_df)
+            if data is not None:
+                self._open_preview("预览：显示列调整", self._project_visible(data))
+
+    def _project_visible(self, df) -> pd.DataFrame:
+        """按过滤页「显示列」设置隐藏列，返回仅含可见列的 DataFrame。
+
+        基准表列受保护：即使隐藏集合误含基准表列也不投影掉。
+        """
+        base_cols = self._base_column_names()
+        hidden = [c for c in self.pages[2].get_hidden()
+                  if c in df.columns and c not in base_cols]
+        return df.drop(columns=hidden) if hidden else df
 
     def on_export(self) -> None:
         """导出最终结果（Sheet1 数据 / Sheet2 统计）到 Excel。"""
@@ -109,8 +179,10 @@ class OperationsMixin(AppBase):
             messagebox.showwarning("提示", "请先执行匹配，再进行导出。")
             return
 
-        # 导出的数据：优先使用过滤后的结果，未过滤则用合并结果
+        # 导出的数据：优先使用过滤后的结果，未过滤则用合并结果；
+        # 按「显示列」设置隐藏不需要的列
         data_df = self.state.filtered_df if self.state.filtered_df is not None else self.state.merged_df
+        data_df = self._project_visible(data_df)
 
         # 调用预留统计模块（calculate_default_stats）
         self.start_progress()

@@ -57,7 +57,7 @@ def main() -> int:
     # app 包依赖上面的项目根目录路径引导，故延迟到函数内导入
     from app.data_loader import list_sheets, load_excel, rename_columns_abbr, scan_columns
     from app.merge_engine import left_join
-    from app.filter_engine import apply_query
+    from app.filter_engine import apply_conditions
     from app.stats import calculate_default_stats
     from app.exporter import export_excel
 
@@ -86,18 +86,50 @@ def main() -> int:
     _assert(pd.isna(row_a04["数量"]) and pd.isna(row_a04["成本"]),
             "A04 左连接未匹配到明细 → NaN（符合左连接语义）")
 
-    print("=== 3. 动态过滤 ===")
-    filtered = apply_query(merged, "销售额 > 1000")
+    print("=== 3. 结构化条件过滤 ===")
+    filtered = apply_conditions(merged, [{"column": "销售额", "op": "大于", "value": "1000"}])
     _assert(len(filtered) == 2, f"过滤后 {len(filtered)} 行（A01/A03）")
-    filtered2 = apply_query(merged, "地区 == '华东'")
+    filtered2 = apply_conditions(merged, [{"column": "地区", "op": "等于", "value": "华东"}])
     _assert(len(filtered2) == 2, f"字符串条件过滤后 {len(filtered2)} 行")
+    # 多条件：并且（AND）关系
+    filtered3 = apply_conditions(merged, [
+        {"column": "销售额", "op": "大于", "value": "1000"},
+        {"column": "地区", "op": "等于", "value": "华东"},
+    ])
+    _assert(len(filtered3) == 1, f"多条件（并且）过滤后 {len(filtered3)} 行（A01）")
+    # 包含 / 不包含
+    _assert(len(apply_conditions(merged, [{"column": "地区", "op": "包含", "value": "华"}])) == 4,
+            "包含过滤：4 行（华东/华东/华北/华南均含「华」）")
+    _assert(len(apply_conditions(merged, [{"column": "地区", "op": "不包含", "value": "华"}])) == 0,
+            "不包含过滤：0 行")
+    # 为空 / 不为空（A04 的数量为空）
+    _assert(len(apply_conditions(merged, [{"column": "数量", "op": "为空", "value": ""}])) == 1,
+            "为空过滤：1 行（A04）")
+    _assert(len(apply_conditions(merged, [{"column": "数量", "op": "不为空", "value": ""}])) == 3,
+            "不为空过滤：3 行")
+    # 不等于排除 NaN（A04 数量为空，不计入）
+    filtered_ne = apply_conditions(merged, [{"column": "数量", "op": "不等于", "value": "10"}])
+    _assert(len(filtered_ne) == 2 and filtered_ne["订单号"].tolist() == ["A02", "A03"],
+            f"不等于过滤排除 NaN：{len(filtered_ne)} 行（A02/A03）")
+    # 空条件返回副本
+    _assert(len(apply_conditions(merged, [])) == 4, "空条件返回全部数据副本")
 
     print("=== 4. 过滤容错 ===")
     try:
-        apply_query(merged, "不存在的字段 > 1")
+        apply_conditions(merged, [{"column": "不存在的字段", "op": "大于", "value": "1"}])
         raise AssertionError("✗ 应当抛错但未抛错")
     except Exception:
         print("  ✓ 字段不存在时正确抛出异常（由 GUI 弹窗提示）")
+    try:
+        apply_conditions(merged, [{"column": "销售额", "op": "大于", "value": "abc"}])
+        raise AssertionError("✗ 数值列输入非数字应当抛错")
+    except Exception:
+        print("  ✓ 数值列输入非数字时正确抛出异常")
+    try:
+        apply_conditions(merged, [{"column": "销售额", "op": "大于", "value": ""}])
+        raise AssertionError("✗ 空比较值应当抛错")
+    except Exception:
+        print("  ✓ 需要值的条件未输入值时正确抛出异常")
 
     print("=== 5. 匹配键缺失报错 ===")
     bad = {(p, s): df.rename(columns={"订单号": "单号"} if "订单号" in df.columns else {})
@@ -202,27 +234,33 @@ def main() -> int:
             "替换完成后自动预览开关已从 cfg 读取（auto_show_after_replace=true）")
     _assert(app_config.PREVIEW_AUTO_AFTER_MERGE is True,
             "匹配完成后自动预览开关已从 cfg 读取（auto_show_after_merge=true）")
+    _assert(app_config.PREVIEW_AUTO_AFTER_FILTER is True,
+            "过滤完成后自动预览开关已从 cfg 读取（auto_show_after_filter=true）")
+    _assert(app_config.PREVIEW_AUTO_AFTER_COLUMNS is True,
+            "显示列调整后自动预览开关已从 cfg 读取（auto_show_after_columns=true）")
 
     print("=== 11. 匹配后冗余列清理 ===")
     from app.merge_engine import clean_redundant_columns
     base2 = pd.DataFrame({"订单号": ["A01", "A02", "A03"],
                           "姓名": ["张三", "李四", "王五"],
-                          "地区": ["华东", "华北", "华南"]})
+                          "地区": ["华东", "华北", "华南"],
+                          "空基": [None, None, None]})     # 基准表自身的全空列 → 保留（不删基准表列）
     merged2 = base2.copy()
     merged2["姓名_2"] = ["张三", "李四", "王五"]      # 与基准表同名且值全相同 → 删
     merged2["姓名_3"] = [None, None, None]            # 基准表有数据、本列全空 → 删
     merged2["空列_2"] = [None, None, None]            # 全空 → 删
     merged2["空串_2"] = ["", " ", ""]                 # 全空字符串（含纯空白）→ 删
     merged2["姓名_4"] = ["张三", "李四", "李四"]       # 同名但值不同 → 保留
+    merged2["姓名_5"] = ["张三", "李四", None]        # 同名、有值的行与基准一致（末行左连接未匹配）→ 删
     merged2["独有列"] = [1, 2, 3]                     # 独有列 → 保留
     merged2["空混_2"] = ["", None, " "]               # NaN/空串/空格混合全空 → 删（防 astype 漏判）
     merged2["半空_2"] = ["", "有值", ""]              # 含一个真实值 → 保留
     cleaned, removed = clean_redundant_columns(merged2, base2)
-    _assert(set(removed) == {"姓名_2", "姓名_3", "空列_2", "空串_2", "空混_2"},
+    _assert(set(removed) == {"姓名_2", "姓名_3", "空列_2", "空串_2", "空混_2", "姓名_5"},
             f"清理出冗余列: {sorted(removed)}")
-    _assert({"订单号", "姓名", "地区", "姓名_4", "独有列", "半空_2"} <= set(cleaned.columns),
-            "主键/基准列/同名不同值列/独有列/含真实值的列均保留")
-    _assert(len(cleaned.columns) == 6, f"清理后列数: {list(cleaned.columns)}")
+    _assert({"订单号", "姓名", "地区", "姓名_4", "独有列", "半空_2", "空基"} <= set(cleaned.columns),
+            "主键/基准列（含基准表空列）/同名不同值列/独有列/含真实值的列均保留")
+    _assert(len(cleaned.columns) == 7, f"清理后列数: {list(cleaned.columns)}")
     _assert(app_config.MERGE_AUTO_CLEAN is True,
             "匹配后自动清理开关已从 cfg 读取（[merge] auto_clean=true）")
 

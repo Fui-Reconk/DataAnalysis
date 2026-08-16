@@ -502,16 +502,153 @@ def main() -> int:
                 config.MERGE_AUTO_CLEAN = orig_merge_clean
             print("[OK] 匹配后自动清理：全空/同名重复列被删，开关可配")
 
-            # 4. 应用过滤
-            app.pages[2].set_query("销售额 > 1000")
-            app.on_apply_filter()
-            assert app.state.filtered_df is not None and len(app.state.filtered_df) == 2
-            print(f"[OK] 应用过滤：{len(app.state.filtered_df)} 行")
+            # 4. 应用过滤（条件行：列名 + 条件 + 比较值；完成后自动弹结果预览）
+            app.pages[2].set_conditions([{"column": "销售额", "op": "大于", "value": "1000"}])
+            filter_previews = []
+            orig_open_preview = app._open_preview
+            app._open_preview = lambda *a, **k: filter_previews.append(a)  # type: ignore[assignment]
+            try:
+                app.on_apply_filter()
+                assert app.state.filtered_df is not None and len(app.state.filtered_df) == 2
+                assert filter_previews and filter_previews[0][0] == "预览：过滤结果", \
+                    "过滤完成后应自动弹出结果预览"
+                assert len(filter_previews[0][1]) == 2, "预览内容应为过滤结果"
+                # 开关关闭时不自动预览
+                filter_previews.clear()
+                config.PREVIEW_AUTO_AFTER_FILTER = False
+                app.on_apply_filter()
+                assert filter_previews == [], "auto_show_after_filter=false 时不自动预览"
+            finally:
+                app._open_preview = orig_open_preview
+                config.PREVIEW_AUTO_AFTER_FILTER = True
+            print(f"[OK] 应用过滤：{len(app.state.filtered_df)} 行；完成后自动预览开关可配")
 
-            # 5. 重置过滤
+            # 5. 重置过滤：恢复全量 + 条件清回默认一行
             app.on_reset_filter()
             assert len(app.state.filtered_df) == 4
+            assert len(app.pages[2]._condition_rows) == 1, "重置后条件应回默认一行"
+            assert app.pages[2]._condition_rows[0]["col_combo"].get() == "", "重置后条件应清空"
             print("[OK] 重置过滤恢复全量")
+
+            # 5b. 过滤条件行交互：默认一行/增删/列名候选/为空禁用数值框/空值提示
+            fp = app.pages[2]
+            merged_cols = list(app.state.merged_df.columns)
+            assert set(fp._condition_rows[0]["col_combo"].cget("values")) == set(merged_cols), \
+                "合并后列名下拉框应包含合并结果列"
+            fp.add_condition_row()
+            assert len(fp._condition_rows) == 2, "添加条件后应为两行"
+            row1 = fp._condition_rows[0]
+            row1["op_combo"].set("为空")
+            fp._on_op_change(row1)  # 模拟用户从下拉框选择（set() 不触发 command 回调）
+            root.update()
+            assert row1["value_entry"].cget("state") == "disabled", "为空时数值框应禁用"
+            row1["op_combo"].set("大于")
+            fp._on_op_change(row1)
+            root.update()
+            assert row1["value_entry"].cget("state") == "normal", "恢复后数值框应可用"
+            # 未输入比较值 → 应用时弹提示（带行号），不崩溃
+            row1["col_combo"].set("销售额")
+            row1["value_entry"].delete(0, "end")
+            orig_sw = messagebox.showwarning
+            warnings = []
+            messagebox.showwarning = lambda *a, **k: warnings.append(a)
+            try:
+                app.on_apply_filter()
+                assert warnings and "请输入比较值" in str(warnings[0]), "空比较值应提示行号"
+            finally:
+                messagebox.showwarning = orig_sw
+            fp.remove_condition_row(row1)
+            assert len(fp._condition_rows) == 1, "删除条件后回一行"
+            orig_si = messagebox.showinfo
+            infos = []
+            messagebox.showinfo = lambda *a, **k: infos.append(a)
+            try:
+                app.on_apply_filter()  # 空行 → 「请先添加过滤条件」提示，不崩溃
+                assert infos and "请至少添加一个过滤条件" in str(infos[0]), \
+                    "空条件应提示先添加过滤条件"
+            finally:
+                messagebox.showinfo = orig_si
+            print("[OK] 过滤条件行：默认一行/增删/列名候选/为空禁用/空值提示")
+
+            # 5c. 隐藏列：预览/导出投影、对话框排除基准表列、调整后自动预览
+            from tkinter import filedialog, messagebox
+            fp5 = app.pages[2]
+            assert "空备注" in fp5.available_columns(), "合并结果应包含可隐藏的列"
+            fp5.set_hidden({"空备注"})
+            assert fp5.get_hidden() == {"空备注"}
+            assert "隐藏 1" in fp5.column_btn.cget("text"), "按钮应显示隐藏数"
+            # 隐藏列不出现在条件行的列名下拉框中
+            row_cols = list(fp5._condition_rows[0]["col_combo"].cget("values"))
+            assert "空备注" not in row_cols, "隐藏列不应出现在列名下拉框"
+            assert "销售额" in row_cols, "可见列应保留在下拉框"
+            # 可隐藏列 = 全部列 - 基准表列（基准表列不可隐藏、不进对话框）
+            hideable = app._hideable_columns()
+            assert "空备注" in hideable and "地区_3" in hideable, "非基准表列应可隐藏"
+            assert not ({"订单号", "地区", "销售额"} & set(hideable)), \
+                "基准表列不应出现在显示列对话框中"
+            # 过滤预览：隐藏列不出现
+            filter_previews.clear()
+            app._open_preview = lambda *a, **k: filter_previews.append(a)  # type: ignore[assignment]
+            try:
+                app.pages[2].set_conditions([{"column": "销售额", "op": "大于", "value": "1000"}])
+                app.on_apply_filter()
+                assert filter_previews and "空备注" not in list(filter_previews[0][1].columns), \
+                    "过滤预览应隐藏所选列"
+                assert "销售额" in list(filter_previews[0][1].columns), "可见列应保留"
+            finally:
+                app._open_preview = orig_open_preview
+            # 导出：隐藏列不写入文件
+            out2 = os.path.join(tmp, "隐藏列导出.xlsx")
+            filedialog.asksaveasfilename = lambda **kw: out2
+            messagebox.showinfo = lambda *a, **kw: None
+            messagebox.showwarning = lambda *a, **kw: None
+            messagebox.showerror = lambda *a, **kw: None
+            app.on_export()
+            data_out = pd.read_excel(out2, sheet_name="最终数据")
+            assert "空备注" not in data_out.columns, "导出应隐藏所选列"
+            assert "销售额" in data_out.columns, "导出应保留可见列"
+            assert "订单号" in data_out.columns, "基准表列始终保留"
+            # 显示列对话框：已隐藏列默认未勾选；勾选恢复显示后自动弹预览
+            from app.sheet_dialog import SheetPickerDialog
+            orig_columns_preview = config.PREVIEW_AUTO_AFTER_COLUMNS
+            filter_previews.clear()
+            app._open_preview = lambda *a, **k: filter_previews.append(a)  # type: ignore[assignment]
+            try:
+                dlg = SheetPickerDialog(root, "选择显示列",
+                                        [(None, c, c) for c in hideable],
+                                        on_confirm=app._apply_visible_columns,
+                                        checked_keys=fp5.get_hidden(),
+                                        hint_text="勾选要显示的列（未勾选 = 隐藏；基准表列始终显示）：")
+                root.update()
+                assert dlg._vars["空备注"].get() == "", "已隐藏列应默认未勾选"
+                dlg._checkboxes["空备注"].toggle()
+                dlg._on_ok()
+                assert "空备注" not in fp5.get_hidden(), "勾选后应取消隐藏"
+                assert "空备注" in list(fp5._condition_rows[0]["col_combo"].cget("values")), \
+                    "取消隐藏后列名下拉框应恢复该列"
+                assert filter_previews and filter_previews[-1][0] == "预览：显示列调整", \
+                    "显示列调整后应自动弹出预览"
+                assert len(filter_previews[-1][1]) == 2, "调整预览内容应为当前数据（过滤结果）"
+                # 开关关闭时不自动预览
+                filter_previews.clear()
+                config.PREVIEW_AUTO_AFTER_COLUMNS = False
+                app._apply_visible_columns(hideable)  # 全部显示
+                assert filter_previews == [], "auto_show_after_columns=false 时不自动预览"
+            finally:
+                app._open_preview = orig_open_preview
+                config.PREVIEW_AUTO_AFTER_COLUMNS = orig_columns_preview
+            # 全部隐藏（仅非基准表列）允许；基准表列不受影响
+            filter_previews.clear()
+            app._open_preview = lambda *a, **k: filter_previews.append(a)  # type: ignore[assignment]
+            try:
+                app._apply_visible_columns([])
+                assert fp5.get_hidden() == set(hideable), "全部非基准表列可隐藏"
+            finally:
+                app._open_preview = orig_open_preview
+            assert not ({"订单号", "地区", "销售额"} & fp5.get_hidden()), "基准表列不可隐藏"
+            fp5.set_hidden(set())
+            assert fp5.column_btn.cget("text") == "☑ 显示列", "无隐藏时按钮无计数"
+            print("[OK] 隐藏列：预览/导出投影、排除基准表列、调整后自动预览")
 
             # 6. 导出（绕过保存对话框与提示弹窗）
             from tkinter import filedialog, messagebox
@@ -529,7 +666,7 @@ def main() -> int:
             # 7. 未匹配就过滤 → 提示（验证守卫逻辑不崩溃）
             app.state.merged_df = None
             app.state.filtered_df = None
-            app.pages[2].set_query("销售额 > 0")
+            app.pages[2].set_conditions([{"column": "销售额", "op": "大于", "value": "0"}])
             app.on_apply_filter()  # 应弹提示而非崩溃
             print("[OK] 未匹配时过滤被正确拦截")
 
