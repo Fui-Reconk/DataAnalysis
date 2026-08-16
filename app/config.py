@@ -126,3 +126,6 @@ LOG_LEVEL = _cfg.get("log", "level", fallback="INFO")
 COLUMN_ABBR_MAP: dict = {}
 if _cfg.has_section("column_map"):
     COLUMN_ABBR_MAP = dict(_cfg.items("column_map"))
+
+# ---------- 匹配后自动清理冗余列 ----------
+MERGE_AUTO_CLEAN = _cfg.getboolean("merge", "auto_clean", fallback=True)

@@ -12,7 +12,7 @@ from app.exporter import default_export_name, export_excel
 from app.filter_engine import apply_query
 from app.gui.base import AppBase
 from app.logger import logger
-from app.merge_engine import left_join
+from app.merge_engine import clean_redundant_columns, left_join
 from app.stats import calculate_default_stats
 
 
@@ -40,6 +40,11 @@ class OperationsMixin(AppBase):
                 logger.warning("匹配失败：%s", exc)
                 messagebox.showerror("匹配失败", str(exc))
                 return
+            # 匹配后按配置自动清理冗余列（仅删非基准表的全空列 / 与基准表同名的重复列）
+            removed_cols: list = []
+            if config.MERGE_AUTO_CLEAN:
+                merged, removed_cols = clean_redundant_columns(
+                    merged, self.state.dataframes[self.state.sources[0]])
             self.state.merged_df = merged
             self.state.filtered_df = merged.copy()
         finally:
@@ -47,9 +52,12 @@ class OperationsMixin(AppBase):
 
         rows, cols = merged.shape
         base_rows = len(self.state.dataframes[self.state.sources[0]])
-        self.pages[1].show_info(
+        info_text = (
             f"✔ 匹配完成：基准表 {base_rows} 行，合并后 {rows} 行 × {cols} 列。\n"
             f"主键「{key}」；重复列名已按数据源序号加后缀区分。")
+        if removed_cols:
+            info_text += f"\n已自动删除 {len(removed_cols)} 个冗余列：\n{'、'.join(removed_cols)}"
+        self.pages[1].show_info(info_text)
         self.pages[2].show_info(f"当前数据：{rows} 行 × {cols} 列（匹配后全量数据）")
         self.set_status("匹配完成，可进行过滤或导出。")
         # 匹配完成后按配置自动弹出结果预览，便于核对合并后的列与行数

@@ -6,12 +6,16 @@
 from __future__ import annotations
 
 import os
+import re
 from typing import Dict, List
 
 import pandas as pd
 
 # 空值哨兵值：将 NaN 统一替换为该字符串，保证跨表匹配键可比较
 NAN_SENTINEL = "<NaN>"
+
+# 重复列后缀：pandas.merge suffixes 生成（如 “姓名_2”），用于识别与基准表同名的列
+_TWIN_SUFFIX = re.compile(r"_\d+$")
 
 
 def left_join(dataframes: Dict[tuple, pd.DataFrame], sources: List[tuple], key: str) -> pd.DataFrame:
@@ -60,3 +64,52 @@ def _validate_key(df: pd.DataFrame, src: tuple, key: str) -> None:
     """校验表中是否包含所选匹配键列，缺失则报错并指明数据源。"""
     if key not in df.columns:
         raise KeyError(f"文件「{_source_label(src)}」中不存在所选匹配键列「{key}」，请检查该文件表头。")
+
+
+def clean_redundant_columns(merged: pd.DataFrame, base: pd.DataFrame) -> tuple[pd.DataFrame, List[str]]:
+    """删除合并结果中非基准表的冗余列，返回 (清理后, 被删列名列表)。
+
+    删除规则（仅作用于非基准表列，基准表自身列永不删除）：
+      - 全空列：全部为 NaN / None / 空字符串（含纯空白）；
+      - 与基准表同名列（去 _N 后缀，如 姓名_2 ↔ 姓名）逐行值全相同的列
+        （NaN 视作相等）——含基准表有数据而该列全空的情形（被全空规则覆盖）。
+
+    效率：按列名配对，比较次数 O(非基准列数)；数值列只做 isna 布尔扫描，
+    不做字符串转换，大数据量下与合并本身同量级。
+    """
+    base_cols = set(base.columns)
+    drop: List[str] = []
+    for col in merged.columns:
+        if col in base_cols:
+            continue  # 基准表列永不删除
+        if _is_all_empty(merged[col]):
+            drop.append(col)
+            continue
+        stem = _TWIN_SUFFIX.sub("", col)
+        if stem in base_cols and _values_identical(merged[col], merged[stem]):
+            drop.append(col)
+    if drop:
+        merged = merged.drop(columns=drop)
+    return merged, drop
+
+
+def _is_all_empty(s: pd.Series) -> bool:
+    """全空列：全部为 NaN / None / 空字符串（含纯空白）。
+
+    数值类 dtype 直接布尔扫描 isna；仅 object / string 列才检查空串，
+    避免对数值列做昂贵的 astype(str) 全量字符串转换。
+    注意必须先 fillna("") 再 astype(str)：否则 NaN 会被转成 "nan" 字符串，
+    导致「NaN 与空串混合」的全空列漏判（真实 Excel 数据常见）。
+    """
+    if s.isna().all():
+        return True
+    if s.dtype == object or isinstance(s.dtype, pd.StringDtype):
+        return bool(s.fillna("").astype(str).str.strip().eq("").all())
+    return False
+
+
+def _values_identical(a: pd.Series, b: pd.Series) -> bool:
+    """两列逐行值全相同（NaN 视作相等）；按位置比较，无索引对齐开销。"""
+    x = a.to_numpy()
+    y = b.to_numpy()
+    return bool(((x == y) | (pd.isna(x) & pd.isna(y))).all())

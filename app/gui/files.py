@@ -131,7 +131,10 @@ class FileOpsMixin(AppBase):
                 "定位失败", f"无法在文件管理器中定位文件：\n{path}\n\n{exc}")
 
     def on_reload_source(self, path: str, sheet: str) -> None:
-        """重新读取该工作表（文件被外部修改后刷新内存数据）。"""
+        """重新读取该工作表（文件被外部修改后刷新内存数据）。
+
+        重载同样自动替换列名缩写（与导入行为一致，避免替换结果被重载还原）。
+        """
         src = (path, sheet)
         if src not in self.state.sources:
             return
@@ -143,8 +146,10 @@ class FileOpsMixin(AppBase):
                 "重新读取失败",
                 f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")
             return
+        df, renamed = self._auto_rename_abbr(df)
         self.state.dataframes[src] = df
-        self._after_files_changed(f"已重载：{os.path.basename(path)} [{sheet}]")
+        suffix = "（已自动替换列名缩写）" if renamed else ""
+        self._after_files_changed(f"已重载：{os.path.basename(path)} [{sheet}]{suffix}")
 
     def on_set_base(self, targets: list | None = None) -> None:
         """将目标设为匹配基准表（仅单个目标时生效）。"""
@@ -258,9 +263,20 @@ class FileOpsMixin(AppBase):
         else:
             self.set_status("未发现可替换的缩写列名。")
 
+    def _auto_rename_abbr(self, df) -> tuple:
+        """按 config.cfg [column_map] 自动替换列名缩写，返回 (df, 是否发生替换)。
+
+        导入 / 重载工作表时调用；未配置映射时原样返回。
+        """
+        if not config.COLUMN_ABBR_MAP:
+            return df, False
+        renamed = rename_columns_abbr(df, config.COLUMN_ABBR_MAP)
+        return renamed, list(renamed.columns) != list(df.columns)
+
     def _add_sources(self, selected) -> None:
         """加载选中的 (文件路径, 工作表名) 列表；None（取消）不处理。
 
+        导入即自动替换列名缩写（映射见 config.cfg [column_map]），
         添加成功后自动弹出首个新数据源的预览。
         """
         if not selected:
@@ -268,6 +284,7 @@ class FileOpsMixin(AppBase):
             return
 
         added_sources = []
+        renamed_count = 0
         self.start_progress()
         try:
             for path, sheet in selected:
@@ -282,6 +299,9 @@ class FileOpsMixin(AppBase):
                         "读取失败",
                         f"文件「{os.path.basename(path)}」工作表「{sheet}」读取失败：\n{exc}")
                     continue
+                df, renamed = self._auto_rename_abbr(df)
+                if renamed:
+                    renamed_count += 1
                 self.state.sources.append(src)
                 self.state.dataframes[src] = df
                 added_sources.append(src)
@@ -290,8 +310,10 @@ class FileOpsMixin(AppBase):
             self.stop_progress()
 
         if added_sources:
-            self._after_files_changed(
-                f"已添加 {len(added_sources)} 个工作表，当前共 {len(self.state.sources)} 个。")
+            status = f"已添加 {len(added_sources)} 个工作表，当前共 {len(self.state.sources)} 个。"
+            if renamed_count:
+                status += f" 已自动替换 {renamed_count} 个工作表的列名缩写。"
+            self._after_files_changed(status)
             # 导入后按配置自动弹出预览（数量可配，全部非模态、级联排列）
             if config.PREVIEW_AUTO_SHOW:
                 count = max(1, min(config.PREVIEW_AUTO_SHOW_COUNT, len(added_sources)))

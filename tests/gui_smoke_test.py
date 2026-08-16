@@ -468,6 +468,40 @@ def main() -> int:
                 config.PREVIEW_AUTO_AFTER_MERGE = True
             print(f"[OK] 执行匹配：合并后 {len(app.state.merged_df)} 行；完成后自动预览开关可配")
 
+            # 3b. 匹配后自动清理冗余列：全空列 / 与基准表同名的重复列（仅删非基准表列）
+            p6 = os.path.join(tmp, "冗余列.xlsx")
+            pd.DataFrame({"订单号": ["A01", "A02", "A03", "A04"],
+                          "地区": ["华东", "华东", "华北", "华南"],
+                          "空备注": [None] * 4}).to_excel(p6, index=False)
+            s6 = list_sheets(p6)[0]
+            src6 = (p6, s6)
+            app.state.sources.append(src6)
+            app.state.dataframes[src6] = load_excel(p6, s6)
+            app.state.staged_files[p6] = [s6]
+            app._invalidate_result()
+            app.pages[0].refresh()
+            app._refresh_match_page()
+            app.pages[1].key_combo.set("订单号")
+            orig_merge_clean = config.MERGE_AUTO_CLEAN
+            app._open_preview = lambda *a, **k: merge_previews.append(a)  # type: ignore[assignment]
+            try:
+                config.MERGE_AUTO_CLEAN = True
+                app.on_execute_merge()
+                merged_cols = set(app.state.merged_df.columns)
+                assert "地区_3" not in merged_cols and "空备注" not in merged_cols, \
+                    "全空列与基准同名的重复列应被自动删除"
+                assert {"地区", "销售额", "数量", "订单号"} <= merged_cols, \
+                    "基准列与正常非基准列应保留"
+                # 开关关闭时不清理
+                config.MERGE_AUTO_CLEAN = False
+                app.on_execute_merge()
+                assert "地区_3" in app.state.merged_df.columns, \
+                    "auto_clean=false 时应保留冗余列"
+            finally:
+                app._open_preview = orig_open_preview
+                config.MERGE_AUTO_CLEAN = orig_merge_clean
+            print("[OK] 匹配后自动清理：全空/同名重复列被删，开关可配")
+
             # 4. 应用过滤
             app.pages[2].set_query("销售额 > 1000")
             app.on_apply_filter()
@@ -533,7 +567,7 @@ def main() -> int:
             root.update()
             print("[OK] 导入自动预览：开关与数量可配置")
 
-            # 7c. 替换缩写后自动预览：便于确认新列名（开关可配）
+            # 7c. 导入即自动替换列名缩写 + 手动「替换缩写」后自动预览（开关可配）
             p5 = os.path.join(tmp, "缩写.xlsx")
             pd.DataFrame({"nd": [2025], "xm": ["张三"], "other": [1]}).to_excel(p5, index=False)
             s5 = list_sheets(p5)[0]
@@ -542,17 +576,29 @@ def main() -> int:
             preview_calls.clear()
             app.on_preview_source = lambda *a, **k: preview_calls.append(a)  # type: ignore[assignment]
             try:
+                # 导入即自动替换：列名直接变为全称，且自动预览新列名
                 app._add_sources([src5])
+                assert list(app.state.dataframes[src5].columns) == ["年度", "姓名", "other"], \
+                    "导入时应自动替换列名缩写"
+                assert preview_calls and preview_calls[0][0:2] == src5, "导入后应自动预览（新列名）"
+                app.on_remove_source(*src5)
                 preview_calls.clear()
+                # 手动路径（模拟映射变更/历史数据）：替换后自动弹预览
+                app.state.sources.append(src5)
+                app.state.dataframes[src5] = pd.DataFrame({"nd": [2025], "xm": ["张三"],
+                                                           "other": [1]})
+                app.state.staged_files[p5] = [s5]
+                app._invalidate_result()
+                app.pages[0].refresh()
                 app.on_replace_abbr([src5])
                 assert preview_calls == [src5], "替换缩写后应自动弹出预览"
                 assert list(app.state.dataframes[src5].columns) == ["年度", "姓名", "other"], \
-                    "替换后列名应为中文全称"
-                app.on_remove_source(*src5)
+                    "手动替换后列名应为中文全称"
+                # 开关关闭时不自动预览
+                app.state.dataframes[src5] = pd.DataFrame({"nd": [2025], "xm": ["张三"],
+                                                           "other": [1]})
                 preview_calls.clear()
                 config.PREVIEW_AUTO_AFTER_REPLACE = False
-                app._add_sources([src5])
-                preview_calls.clear()
                 app.on_replace_abbr([src5])
                 assert preview_calls == [], "auto_show_after_replace=false 时不自动预览"
                 app.on_remove_source(*src5)
@@ -560,7 +606,7 @@ def main() -> int:
                 config.PREVIEW_AUTO_AFTER_REPLACE = orig_replace_preview
                 app.on_preview_source = orig_preview
             root.update()
-            print("[OK] 替换缩写后自动预览：开关可配置、弹出确认新列名")
+            print("[OK] 导入自动替换缩写 + 手动替换自动预览：均生效、开关可配")
 
             # 8. 工作表多选对话框：按文件分组层级 + 勾选语义 + 全选/全不选
             from app.sheet_dialog import SheetPickerDialog

@@ -203,6 +203,29 @@ def main() -> int:
     _assert(app_config.PREVIEW_AUTO_AFTER_MERGE is True,
             "匹配完成后自动预览开关已从 cfg 读取（auto_show_after_merge=true）")
 
+    print("=== 11. 匹配后冗余列清理 ===")
+    from app.merge_engine import clean_redundant_columns
+    base2 = pd.DataFrame({"订单号": ["A01", "A02", "A03"],
+                          "姓名": ["张三", "李四", "王五"],
+                          "地区": ["华东", "华北", "华南"]})
+    merged2 = base2.copy()
+    merged2["姓名_2"] = ["张三", "李四", "王五"]      # 与基准表同名且值全相同 → 删
+    merged2["姓名_3"] = [None, None, None]            # 基准表有数据、本列全空 → 删
+    merged2["空列_2"] = [None, None, None]            # 全空 → 删
+    merged2["空串_2"] = ["", " ", ""]                 # 全空字符串（含纯空白）→ 删
+    merged2["姓名_4"] = ["张三", "李四", "李四"]       # 同名但值不同 → 保留
+    merged2["独有列"] = [1, 2, 3]                     # 独有列 → 保留
+    merged2["空混_2"] = ["", None, " "]               # NaN/空串/空格混合全空 → 删（防 astype 漏判）
+    merged2["半空_2"] = ["", "有值", ""]              # 含一个真实值 → 保留
+    cleaned, removed = clean_redundant_columns(merged2, base2)
+    _assert(set(removed) == {"姓名_2", "姓名_3", "空列_2", "空串_2", "空混_2"},
+            f"清理出冗余列: {sorted(removed)}")
+    _assert({"订单号", "姓名", "地区", "姓名_4", "独有列", "半空_2"} <= set(cleaned.columns),
+            "主键/基准列/同名不同值列/独有列/含真实值的列均保留")
+    _assert(len(cleaned.columns) == 6, f"清理后列数: {list(cleaned.columns)}")
+    _assert(app_config.MERGE_AUTO_CLEAN is True,
+            "匹配后自动清理开关已从 cfg 读取（[merge] auto_clean=true）")
+
     print("\n=== 全部功能测试通过 ===")
     return 0
 
