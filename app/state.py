@@ -28,3 +28,8 @@ class AppState:
     merged_df: Optional[pd.DataFrame] = None
     # 经用户条件过滤后的最终数据表（未过滤时与 merged_df 相同）
     filtered_df: Optional[pd.DataFrame] = None
+    # 最近一次计算的分组统计结果（导出时 Sheet2 使用；数据变化后失效）
+    stats_df: Optional[pd.DataFrame] = None
+    # 「写入统计结果」在内存中累积的统计工作表 [(sheet名, DataFrame), ...]，
+    # 点「导出结果」时一并写入文件（统计结果、统计结果_2、…）
+    stats_sheets: list = field(default_factory=list)

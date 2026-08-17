@@ -58,7 +58,7 @@ def main() -> int:
     from app.data_loader import list_sheets, load_excel, rename_columns_abbr, scan_columns
     from app.merge_engine import left_join
     from app.filter_engine import apply_conditions
-    from app.stats import calculate_default_stats
+    from app.stats import group_count
     from app.exporter import export_excel
 
     tmp = tempfile.mkdtemp(prefix="data_matcher_test_")
@@ -140,17 +140,42 @@ def main() -> int:
     except KeyError as e:
         print(f"  ✓ 缺列时正确报错: {e}")
 
-    print("=== 6. 统计模块（预留）与导出 ===")
-    stats = calculate_default_stats(merged)
-    _assert(stats.empty, "calculate_default_stats 当前返回空 DataFrame（预留）")
+    print("=== 6. 分组统计与导出 ===")
+    stats = group_count(merged)  # 不分组 → 总数量
+    _assert(list(stats.columns) == ["数量"] and int(stats.iloc[0, 0]) == 4,
+            f"不分组统计总数量: {int(stats.iloc[0, 0])}")
+    stats2 = group_count(merged, group_by="地区")
+    _assert(stats2["地区"].tolist() == ["华东", "华北", "华南"]
+            and stats2["数量"].tolist() == [2, 1, 1],
+            f"按地区分组计数: {stats2.to_dict('records')}")
+    stats3 = group_count(merged, group_by="地区",
+                         conditions=[{"column": "销售额", "op": "大于", "value": "1000"}])
+    _assert(stats3["数量"].sum() == 2 and stats3["地区"].tolist() == ["华东", "华北"],
+            f"条件 + 分组：只统计符合条件的行: {stats3.to_dict('records')}")
+    stats4 = group_count(merged, group_by="数量")
+    _assert(len(stats4) == 4, f"分组列含空值（A04）自成一组: {len(stats4)} 组")
 
     out = os.path.join(tmp, "导出测试.xlsx")
-    export_excel(filtered, stats, out)
+    export_excel(filtered, out)
     xl = pd.ExcelFile(out)
-    _assert("最终数据" in xl.sheet_names and "统计结果" in xl.sheet_names,
-            f"导出包含双 Sheet: {xl.sheet_names}")
-    sheet2 = pd.read_excel(out, sheet_name="统计结果")
-    _assert(sheet2.iloc[0, 0] == "未定义统计", "统计为空时 Sheet2 写入占位内容")
+    _assert(xl.sheet_names == ["最终数据"], f"未累积统计时只写最终数据: {xl.sheet_names}")
+
+    # 统计结果累积：内存中追加命名，导出时一并写入
+    from app.exporter import next_stats_sheet_name
+    _assert(next_stats_sheet_name([]) == "统计结果", "首份统计 sheet 名")
+    _assert(next_stats_sheet_name(["统计结果"]) == "统计结果_2", "追加命名避让")
+    _assert(next_stats_sheet_name(["统计结果", "统计结果_2", "统计结果_3"]) == "统计结果_4",
+            "连续追加命名")
+    out3 = os.path.join(tmp, "统计导出.xlsx")
+    export_excel(filtered, out3,
+                 stats_sheets=[("统计结果", stats2), ("统计结果_2", stats3)])
+    xl3 = pd.ExcelFile(out3)
+    _assert(xl3.sheet_names == ["最终数据", "统计结果", "统计结果_2"],
+            f"导出包含最终数据与累积统计: {xl3.sheet_names}")
+    sheet_a = pd.read_excel(out3, sheet_name="统计结果")
+    _assert(sheet_a["地区"].tolist() == ["华东", "华北", "华南"]
+            and sheet_a["数量"].tolist() == [2, 1, 1],
+            f"第一份统计内容: {sheet_a.to_dict('records')}")
 
     print("=== 7. 多工作表支持 ===")
     multi = os.path.join(tmp, "多表.xlsx")

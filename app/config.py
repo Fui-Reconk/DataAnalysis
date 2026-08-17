@@ -82,11 +82,6 @@ FONT_SMALL = _font("font", "small", ("Microsoft YaHei UI", 11))
 STATUS_READY = _cfg.get("status", "ready", fallback="就绪")
 STATUS_BUSY = _cfg.get("status", "busy", fallback="处理中，请稍候…")
 
-# ---------- 统计占位文案 ----------
-STATS_PLACEHOLDER_TEXT = _cfg.get(
-    "stats", "placeholder_text",
-    fallback="默认统计项：预留（请在代码 calculate_default_stats 中自定义）")
-
 # ---------- 应用信息 ----------
 APP_TITLE = _cfg.get("app", "title", fallback="数据匹配与统计工具")
 APP_SUBTITLE = _cfg.get("app", "subtitle",

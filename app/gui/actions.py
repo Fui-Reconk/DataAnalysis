@@ -10,13 +10,13 @@ from tkinter import filedialog, messagebox
 import pandas as pd
 
 from app import config
-from app.exporter import default_export_name, export_excel
+from app.exporter import default_export_name, export_excel, next_stats_sheet_name
 from app.filter_engine import apply_conditions
 from app.gui.base import AppBase
 from app.logger import logger
 from app.merge_engine import clean_redundant_columns, left_join
 from app.sheet_dialog import SheetPickerDialog
-from app.stats import calculate_default_stats
+from app.stats import count_column_name, group_count
 
 
 class OperationsMixin(AppBase):
@@ -50,6 +50,8 @@ class OperationsMixin(AppBase):
                     merged, self.state.dataframes[self.state.sources[0]])
             self.state.merged_df = merged
             self.state.filtered_df = merged.copy()
+            self.state.stats_df = None
+            self.state.stats_sheets = []  # 数据变化，累积的统计失效
         finally:
             self.stop_progress()
 
@@ -63,6 +65,8 @@ class OperationsMixin(AppBase):
         self.pages[1].show_info(info_text)
         self.pages[2].update_columns(list(merged.columns))
         self.pages[2].show_info(f"当前数据：{rows} 行 × {cols} 列（匹配后全量数据）")
+        # 统计页候选列跟随过滤页可见列（隐藏列不出现）
+        self.pages[3].update_columns(self.pages[2].visible_columns())
         self.set_status("匹配完成，可进行过滤或导出。")
         # 匹配完成后按配置自动弹出结果预览，便于核对合并后的列与行数
         if config.PREVIEW_AUTO_AFTER_MERGE:
@@ -93,6 +97,8 @@ class OperationsMixin(AppBase):
                 messagebox.showerror("过滤失败", f"过滤条件执行失败：\n{exc}")
                 return
             self.state.filtered_df = result
+            self.state.stats_df = None  # 数据变化，旧统计结果失效
+            self.state.stats_sheets = []
         finally:
             self.stop_progress()
 
@@ -109,6 +115,8 @@ class OperationsMixin(AppBase):
         if self.state.merged_df is None:
             return
         self.state.filtered_df = self.state.merged_df.copy()
+        self.state.stats_df = None  # 数据变化，旧统计结果失效
+        self.state.stats_sheets = []
         self.pages[2].reset_conditions()
         rows = len(self.state.merged_df)
         self.pages[2].show_info(f"已重置，当前为匹配后全量数据：{rows} 行。")
@@ -152,6 +160,8 @@ class OperationsMixin(AppBase):
             return
         hidden = {c for c in self._hideable_columns() if c not in keys}
         self.pages[2].set_hidden(hidden)
+        # 统计页下拉框同步：隐藏列不再出现
+        self.pages[3].update_columns(self.pages[2].visible_columns())
         if hidden:
             self.set_status(f"已更新显示列：隐藏 {len(hidden)} 列。")
         else:
@@ -173,8 +183,49 @@ class OperationsMixin(AppBase):
                   if c in df.columns and c not in base_cols]
         return df.drop(columns=hidden) if hidden else df
 
+    # ---- 分组统计 ----
+
+    def on_compute_stats(self) -> None:
+        """按分组列 + 条件行统计符合条件的数据数量，弹预览展示结果。"""
+        if self.state.merged_df is None:
+            messagebox.showwarning("提示", "请先执行匹配，再进行统计。")
+            return
+        try:
+            conditions = self.pages[3].get_conditions()
+            group_by = self.pages[3].get_group_by()
+        except ValueError as exc:
+            messagebox.showwarning("统计条件有误", str(exc))
+            return
+
+        self.start_progress()
+        self.set_status("正在计算统计…")
+        try:
+            try:
+                stats = group_count(
+                    self.state.filtered_df if self.state.filtered_df is not None
+                    else self.state.merged_df,
+                    group_by=group_by, conditions=conditions)
+            except Exception as exc:  # 条件/数值不合法需弹窗提示，不崩溃（BLE001 见 .flake8）
+                logger.error("统计失败：%s", exc, exc_info=True)
+                messagebox.showerror("统计失败", f"统计执行失败：\n{exc}")
+                return
+            self.state.stats_df = stats
+        finally:
+            self.stop_progress()
+
+        matched = int(stats[count_column_name(group_by)].sum()) if group_by \
+            else int(stats.iloc[0, 0])
+        if group_by:
+            text = f"✔ 统计完成：{matched} 条符合条件，按「{group_by}」分为 {len(stats)} 组。"
+        else:
+            text = f"✔ 统计完成：共 {matched} 条符合条件。"
+        self.pages[3].show_info(text)
+        self.set_status("统计完成，可点「写入统计结果」保存。")
+        # 弹出统计结果预览（非模态，便于核对各分组数量）
+        self._open_preview("预览：统计结果", stats)
+
     def on_export(self) -> None:
-        """导出最终结果（Sheet1 数据 / Sheet2 统计）到 Excel。"""
+        """导出最终数据（仅 Sheet「最终数据」；统计结果由「写入统计结果」单独追加）。"""
         if self.state.merged_df is None:
             messagebox.showwarning("提示", "请先执行匹配，再进行导出。")
             return
@@ -183,19 +234,6 @@ class OperationsMixin(AppBase):
         # 按「显示列」设置隐藏不需要的列
         data_df = self.state.filtered_df if self.state.filtered_df is not None else self.state.merged_df
         data_df = self._project_visible(data_df)
-
-        # 调用预留统计模块（calculate_default_stats）
-        self.start_progress()
-        self.set_status("正在计算统计…")
-        try:
-            try:
-                stats_df = calculate_default_stats(data_df)
-            except Exception as exc:  # 统计逻辑由用户编写，出错需兜底（BLE001 见 .flake8）
-                logger.error("统计计算失败：%s", exc, exc_info=True)
-                messagebox.showerror("统计计算失败", f"calculate_default_stats 执行出错：\n{exc}")
-                stats_df = None
-        finally:
-            self.stop_progress()
 
         # 选择保存路径（默认文件名：匹配结果_时间戳.xlsx）
         path = filedialog.asksaveasfilename(
@@ -210,7 +248,8 @@ class OperationsMixin(AppBase):
         self.set_status("正在写入 Excel…")
         try:
             try:
-                out_path = export_excel(data_df, stats_df, path)  # type: ignore
+                out_path = export_excel(data_df, path,
+                                        stats_sheets=self.state.stats_sheets)
             except Exception as exc:  # 写入失败需弹窗提示（BLE001 见 .flake8）
                 logger.error("导出失败：%s - %s", path, exc, exc_info=True)
                 messagebox.showerror("导出失败", f"写入文件失败：\n{exc}")
@@ -221,3 +260,25 @@ class OperationsMixin(AppBase):
         self.pages[3].show_info(f"✔ 已导出至：\n{out_path}")
         self.set_status("导出成功。")
         messagebox.showinfo("导出成功", f"结果已保存到：\n{out_path}")
+
+    def on_write_stats(self) -> None:
+        """将当前统计结果追加到导出内存（不写文件），导出时一并写入。"""
+        if self.state.merged_df is None:
+            messagebox.showwarning("提示", "请先执行匹配，再进行统计。")
+            return
+        if self.state.stats_df is None:
+            messagebox.showinfo("提示", "请先点击「计算统计」生成统计结果。")
+            return
+        # 二级确认：防止误追加
+        if not messagebox.askyesno(
+                "确认追加",
+                "将当前统计结果追加到导出文件（先在内存中累积，点「导出结果」时\n"
+                "一并写入；同一份统计可多次追加），确认继续？"):
+            return
+        names = [n for n, _ in self.state.stats_sheets]
+        sheet_name = next_stats_sheet_name(names)
+        self.state.stats_sheets.append((sheet_name, self.state.stats_df.copy()))
+        self.pages[3].show_info(
+            f"✔ 已追加统计结果（工作表：{sheet_name}），"
+            f"当前共 {len(self.state.stats_sheets)} 份统计，导出时一并写入。")
+        self.set_status(f"统计已加入导出（{sheet_name}）。")

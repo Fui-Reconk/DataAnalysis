@@ -363,14 +363,18 @@ class FileOpsMixin(AppBase):
         self.pages[1].update_columns(base_cols)
 
     def _invalidate_result(self) -> None:
-        """数据源集合变化时，使旧的匹配/过滤结果失效并清空相关提示。
+        """数据源集合变化时，使旧的匹配/过滤/统计结果失效并清空相关提示。
 
-        过滤条件行清回默认一行，列名下拉框候选清空（需重新匹配后填充）。
+        过滤与统计条件行清回默认一行，列名下拉框候选清空（需重新匹配后填充）。
         """
         self.state.merged_df = None
         self.state.filtered_df = None
+        self.state.stats_df = None
+        self.state.stats_sheets = []
         self.pages[1].show_info("")
         self.pages[2].reset_conditions()
         self.pages[2].update_columns([])
         self.pages[2].show_info("")
+        self.pages[3].reset_conditions()
+        self.pages[3].update_columns([])
         self.pages[3].show_info("")

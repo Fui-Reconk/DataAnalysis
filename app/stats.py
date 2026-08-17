@@ -1,25 +1,39 @@
-"""默认统计模块（预留区域）。
+"""分组统计引擎。
 
-这是工具提供的“专门的计算模块区域”，供用户自行编写统计逻辑。
-GUI 界面会显示“默认统计项：预留”，并在导出时调用本函数生成 Sheet2。
+按统计页配置对当前数据执行分组计数：先应用统计条件（复用过滤引擎的
+结构化条件），再按分组列分类，统计每组符合条件的数据数量。
 """
 from __future__ import annotations
 
 import pandas as pd
 
+from app.filter_engine import apply_conditions
 
-def calculate_default_stats(df: pd.DataFrame) -> pd.DataFrame:
-    """计算默认统计项。
 
-    入参为导出时的最终数据表（合并且过滤后的结果）。
+def count_column_name(group_by: str | None) -> str:
+    """分组计数结果中「数量」列的名字；分组列恰为「数量」时自动避让重名。"""
+    return "数量" if group_by != "数量" else "数量（计数）"
 
-    【预留】请在此处自定义统计逻辑，例如：
-        - 分组计数：
-            return df.groupby("地区").size().reset_index(name="数量")
-        - 求和 / 平均值：
-            return df.groupby("地区")["销售额"].sum().reset_index()
 
-    当前返回空 DataFrame，表示“未定义统计”。
+def group_count(df: pd.DataFrame, group_by: str | None = None,
+                conditions: list | None = None) -> pd.DataFrame:
+    """统计符合条件的数据数量，可按列分组。
+
+    参数：
+      - df：待统计数据（当前过滤结果或合并结果）
+      - group_by：分组列名；None 表示不分组，只返回总数量
+      - conditions：统计条件（与过滤页同格式的 [{"column","op","value"}]），
+        全部为「并且」关系；None/空表示统计全部数据
+
+    返回：
+      - 不分组：[数量] 单行表
+      - 分组：[分组列, 数量]（分组列恰为「数量」时计数列名为「数量（计数）」），
+        按分组列出现顺序；分组列中的空值（NaN）自成一组（dropna=False），
+        不丢失数据
     """
-    # TODO: 在此处添加默认统计逻辑（例如：分组计数、求和、平均值等）
-    return pd.DataFrame()
+    if conditions:
+        df = apply_conditions(df, conditions)
+    count_col = count_column_name(group_by)
+    if not group_by:
+        return pd.DataFrame({count_col: [len(df)]})
+    return df.groupby(group_by, dropna=False).size().reset_index(name=count_col)

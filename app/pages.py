@@ -328,98 +328,25 @@ class MatchPage(ctk.CTkFrame):
         self.info_label.configure(text=text)
 
 
-class FilterPage(ctk.CTkFrame):
-    """过滤筛选区：按「列名 + 条件 + 比较值」条件行过滤。
+class ConditionList(ctk.CTkScrollableFrame):
+    """可增删的条件行列表（列名 + 条件 + 比较值 + 删除按钮，同一行）。
 
-    每行一个条件组（三个控件同一行），可自由增删，默认一行；
-    多组条件之间为「并且（AND）」关系。列名候选来自合并结果。
+    过滤页与统计页共用：多行条件为「并且」关系；选 为空/不为空 时自动
+    禁用数值框。列名候选由调用方通过 update_columns 提供（过滤页传
+    可见列，统计页传全部列）。
     """
 
-    def __init__(self, master, app: "DataMatcherApp", **kwargs):
+    def __init__(self, master, **kwargs):
         super().__init__(master, **kwargs)
-        self.app = app
         self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(1, weight=1)
-
-        # 标题
-        ctk.CTkLabel(self, text="过滤筛选", font=config.FONT_TITLE).grid(
-            row=0, column=0, sticky="w", padx=20, pady=(20, 10))
-
-        # 条件区（可滚动，每行一个条件组）
-        self.cond_scroll = ctk.CTkScrollableFrame(self, label_text="过滤条件",
-                                                  label_font=config.FONT_SMALL)
-        self.cond_scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=8)
-        self.cond_scroll.grid_columnconfigure(0, weight=1)
         self._condition_rows: list = []
         self._columns: list = []
-        self._hidden: set = set()  # 隐藏的列名集合（勾选对话框未勾选 = 隐藏）
-
-        # 工具按钮行：添加条件 + 显示列管理
-        tools = ctk.CTkFrame(self, fg_color="transparent")
-        tools.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 6))
-        ctk.CTkButton(tools, text="➕ 添加条件", command=self.add_condition_row,
-                      font=config.FONT_BODY, width=130, fg_color="gray35",
-                      hover_color="gray45").pack(side="left")
-        self.column_btn = ctk.CTkButton(tools, text="☑ 显示列", width=150,
-                                        command=self.app.on_choose_visible_columns,
-                                        font=config.FONT_BODY)
-        self.column_btn.pack(side="left", padx=(10, 0))
-
-        # 操作按钮
-        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
-        btn_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(8, 6))
-        ctk.CTkButton(btn_frame, text="✔ 应用过滤", command=self.app.on_apply_filter,
-                      font=config.FONT_BODY, width=130).pack(side="left", padx=(0, 10))
-        ctk.CTkButton(btn_frame, text="重置过滤", command=self.app.on_reset_filter,
-                      font=config.FONT_BODY, width=130, fg_color="gray35",
-                      hover_color="gray45").pack(side="left")
-
-        # 过滤结果信息
-        self.info_label = ctk.CTkLabel(self, text="", font=config.FONT_BODY,
-                                       justify="left", anchor="w", wraplength=660)
-        self.info_label.grid(row=4, column=0, sticky="w", padx=20, pady=6)
-
         self.add_condition_row()
 
-    # ---- 隐藏列（显示列）管理 ----
-
-    def available_columns(self) -> list:
-        """全部候选列（含隐藏列，用于条件行下拉框与显示列对话框）。"""
-        return list(self._columns)
-
-    def get_hidden(self) -> set:
-        """当前隐藏的列名集合。"""
-        return set(self._hidden)
-
-    def visible_columns(self) -> list:
-        """可见列（全部候选列减去隐藏列），用于过滤结果预览与导出投影。"""
-        return [c for c in self._columns if c not in self._hidden]
-
-    def set_hidden(self, hidden: set) -> None:
-        """设置隐藏列集合（自动裁掉不在候选列中的名字）并刷新按钮/下拉框。"""
-        self._hidden = {c for c in hidden if c in self._columns}
-        self._refresh_column_btn()
-        self._refresh_row_columns()
-
-    def _refresh_column_btn(self) -> None:
-        """刷新「显示列」按钮文案（显示当前隐藏列数）。"""
-        n = len(self._hidden)
-        self.column_btn.configure(text=f"☑ 显示列（隐藏 {n}）" if n else "☑ 显示列")
-
-    def _refresh_row_columns(self) -> None:
-        """刷新条件行列名下拉框候选：只列可见列，隐藏列不出现。"""
-        visible = self.visible_columns()
-        for row in self._condition_rows:
-            current = row["col_combo"].get()
-            row["col_combo"].configure(values=list(visible))
-            row["col_combo"].set(current if current in visible else "")
-
-    # ---- 条件行管理 ----
-
     def add_condition_row(self) -> None:
-        """新增一行过滤条件（列名 + 条件 + 比较值 + 删除按钮，同一行）。"""
+        """新增一行条件（列名 + 条件 + 比较值 + 删除按钮，同一行）。"""
         row = {}
-        frame = ctk.CTkFrame(self.cond_scroll, fg_color="transparent")
+        frame = ctk.CTkFrame(self, fg_color="transparent")
         frame.grid(row=len(self._condition_rows), column=0, sticky="ew", pady=3)
         for c in range(3):
             frame.grid_columnconfigure(c, weight=1)
@@ -470,14 +397,13 @@ class FilterPage(ctk.CTkFrame):
         else:
             entry.configure(state="normal")
 
-    # ---- 与控制器交互的 API ----
-
     def update_columns(self, columns: list) -> None:
-        """刷新候选列（合并结果列；失效时传空列表），并同步隐藏集与下拉框。"""
+        """刷新列名下拉框候选（调用方决定传全部列还是可见列）。"""
         self._columns = [str(c) for c in columns]
-        self._hidden = {c for c in self._hidden if c in self._columns}
-        self._refresh_column_btn()
-        self._refresh_row_columns()
+        for row in self._condition_rows:
+            current = row["col_combo"].get()
+            row["col_combo"].configure(values=list(self._columns))
+            row["col_combo"].set(current if current in self._columns else "")
 
     def get_conditions(self) -> list:
         """读取全部条件；未选/非法时抛 ValueError 并指明行号。
@@ -528,41 +454,214 @@ class FilterPage(ctk.CTkFrame):
             self.remove_condition_row(row)
         self.add_condition_row()
 
-    def show_info(self, text: str) -> None:
-        self.info_label.configure(text=text)
 
+class FilterPage(ctk.CTkFrame):
+    """过滤筛选区：按「列名 + 条件 + 比较值」条件行过滤。
 
-class StatsExportPage(ctk.CTkFrame):
-    """统计与导出区：统计占位 + 结果导出。"""
+    每行一个条件组（三个控件同一行），可自由增删，默认一行；
+    多组条件之间为「并且（AND）」关系。列名候选来自合并结果。
+    """
 
     def __init__(self, master, app: "DataMatcherApp", **kwargs):
         super().__init__(master, **kwargs)
         self.app = app
         self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
+
+        # 标题
+        ctk.CTkLabel(self, text="过滤筛选", font=config.FONT_TITLE).grid(
+            row=0, column=0, sticky="w", padx=20, pady=(20, 10))
+
+        # 条件区（可滚动，每行一个条件组）
+        self.cond_scroll = ConditionList(self, label_text="过滤条件",
+                                         label_font=config.FONT_SMALL)
+        self.cond_scroll.grid(row=1, column=0, sticky="nsew", padx=20, pady=8)
+        self._columns: list = []
+        self._hidden: set = set()  # 隐藏的列名集合（勾选对话框未勾选 = 隐藏）
+
+        # 工具按钮行：添加条件 + 显示列管理
+        tools = ctk.CTkFrame(self, fg_color="transparent")
+        tools.grid(row=2, column=0, sticky="ew", padx=20, pady=(4, 6))
+        ctk.CTkButton(tools, text="➕ 添加条件", command=self.add_condition_row,
+                      font=config.FONT_BODY, width=130, fg_color="gray35",
+                      hover_color="gray45").pack(side="left")
+        self.column_btn = ctk.CTkButton(tools, text="☑ 显示列", width=150,
+                                        command=self.app.on_choose_visible_columns,
+                                        font=config.FONT_BODY)
+        self.column_btn.pack(side="left", padx=(10, 0))
+
+        # 操作按钮
+        btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        btn_frame.grid(row=3, column=0, sticky="ew", padx=20, pady=(8, 6))
+        ctk.CTkButton(btn_frame, text="✔ 应用过滤", command=self.app.on_apply_filter,
+                      font=config.FONT_BODY, width=130).pack(side="left", padx=(0, 10))
+        ctk.CTkButton(btn_frame, text="重置过滤", command=self.app.on_reset_filter,
+                      font=config.FONT_BODY, width=130, fg_color="gray35",
+                      hover_color="gray45").pack(side="left")
+
+        # 过滤结果信息
+        self.info_label = ctk.CTkLabel(self, text="", font=config.FONT_BODY,
+                                       justify="left", anchor="w", wraplength=660)
+        self.info_label.grid(row=4, column=0, sticky="w", padx=20, pady=6)
+
+    # ---- 隐藏列（显示列）管理 ----
+
+    def available_columns(self) -> list:
+        """全部候选列（含隐藏列，用于条件行下拉框与显示列对话框）。"""
+        return list(self._columns)
+
+    def get_hidden(self) -> set:
+        """当前隐藏的列名集合。"""
+        return set(self._hidden)
+
+    def visible_columns(self) -> list:
+        """可见列（全部候选列减去隐藏列），用于过滤结果预览与导出投影。"""
+        return [c for c in self._columns if c not in self._hidden]
+
+    def set_hidden(self, hidden: set) -> None:
+        """设置隐藏列集合（自动裁掉不在候选列中的名字）并刷新按钮/下拉框。"""
+        self._hidden = {c for c in hidden if c in self._columns}
+        self._refresh_column_btn()
+        self._refresh_row_columns()
+
+    def _refresh_column_btn(self) -> None:
+        """刷新「显示列」按钮文案（显示当前隐藏列数）。"""
+        n = len(self._hidden)
+        self.column_btn.configure(text=f"☑ 显示列（隐藏 {n}）" if n else "☑ 显示列")
+
+    def _refresh_row_columns(self) -> None:
+        """刷新条件行列名下拉框候选：只列可见列，隐藏列不出现。"""
+        self.cond_scroll.update_columns(self.visible_columns())
+
+    def update_columns(self, columns: list) -> None:
+        """刷新候选列（合并结果列；失效时传空列表），并同步隐藏集与下拉框。"""
+        self._columns = [str(c) for c in columns]
+        self._hidden = {c for c in self._hidden if c in self._columns}
+        self._refresh_column_btn()
+        self._refresh_row_columns()
+
+    # ---- 条件行（转发给 ConditionList，保持调用方/测试兼容） ----
+
+    @property
+    def _condition_rows(self) -> list:
+        return self.cond_scroll._condition_rows
+
+    def add_condition_row(self) -> None:
+        self.cond_scroll.add_condition_row()
+
+    def remove_condition_row(self, row: dict) -> None:
+        self.cond_scroll.remove_condition_row(row)
+
+    def _on_op_change(self, row: dict) -> None:
+        self.cond_scroll._on_op_change(row)
+
+    def get_conditions(self) -> list:
+        return self.cond_scroll.get_conditions()
+
+    def set_conditions(self, conditions: list) -> None:
+        self.cond_scroll.set_conditions(conditions)
+
+    def reset_conditions(self) -> None:
+        self.cond_scroll.reset_conditions()
+
+    def show_info(self, text: str) -> None:
+        self.info_label.configure(text=text)
+
+
+class StatsExportPage(ctk.CTkFrame):
+    """统计与导出区：按「分组列 + 条件行」统计符合条件的数据数量，并导出结果。
+
+    分组列下拉框（含「（不分组）」）选择分类列；条件行与过滤页同款
+    （列名 + 条件 + 比较值，可增删，默认一行，多行为「并且」）；
+    「计算统计」预览分组计数结果，导出时 Sheet2 写入统计表。
+    """
+
+    def __init__(self, master, app: "DataMatcherApp", **kwargs):
+        super().__init__(master, **kwargs)
+        self.app = app
+        self.grid_columnconfigure(0, weight=1)
+        self.grid_rowconfigure(1, weight=1)
 
         # 标题
         ctk.CTkLabel(self, text="统计与导出", font=config.FONT_TITLE).grid(
-            row=0, column=0, sticky="w", padx=20, pady=(20, 15))
+            row=0, column=0, sticky="w", padx=20, pady=(20, 10))
 
-        # 统计占位卡片
+        # 统计配置卡片
         stats_card = ctk.CTkFrame(self)
-        stats_card.grid(row=1, column=0, sticky="ew", padx=20, pady=8)
+        stats_card.grid(row=1, column=0, sticky="nsew", padx=20, pady=8)
         stats_card.grid_columnconfigure(0, weight=1)
-        ctk.CTkLabel(stats_card, text="默认统计项", font=config.FONT_BODY, anchor="w").grid(
-            row=0, column=0, sticky="w", padx=14, pady=(14, 4))
-        ctk.CTkLabel(stats_card, text=config.STATS_PLACEHOLDER_TEXT, font=config.FONT_SMALL,
-                     text_color="gray60", anchor="w", justify="left", wraplength=620).grid(
-            row=1, column=0, sticky="w", padx=14, pady=(0, 14))
+        stats_card.grid_rowconfigure(1, weight=1)
+
+        # 分组列
+        grp_frame = ctk.CTkFrame(stats_card, fg_color="transparent")
+        grp_frame.grid(row=0, column=0, sticky="ew", padx=14, pady=(12, 6))
+        grp_frame.grid_columnconfigure(1, weight=1)
+        ctk.CTkLabel(grp_frame, text="分组列", font=config.FONT_BODY).grid(
+            row=0, column=0, sticky="w", padx=(0, 12))
+        self.group_combo = ctk.CTkComboBox(grp_frame, values=["（不分组）"],
+                                           state="readonly", font=config.FONT_BODY)
+        self.group_combo.grid(row=0, column=1, sticky="ew")
+        self.group_combo.set("（不分组）")
+        self._columns: list = []
+
+        # 条件行（同过滤页）
+        self.cond_scroll = ConditionList(stats_card, label_text="统计条件（符合条件才计数）",
+                                         label_font=config.FONT_SMALL)
+        self.cond_scroll.grid(row=1, column=0, sticky="nsew", padx=12, pady=4)
+
+        # 工具行：添加条件 + 计算统计 + 写入统计结果
+        tools = ctk.CTkFrame(stats_card, fg_color="transparent")
+        tools.grid(row=2, column=0, sticky="ew", padx=12, pady=(6, 12))
+        ctk.CTkButton(tools, text="➕ 添加条件", command=self.cond_scroll.add_condition_row,
+                      font=config.FONT_BODY, width=130, fg_color="gray35",
+                      hover_color="gray45").pack(side="left")
+        ctk.CTkButton(tools, text="▶ 计算统计", command=self.app.on_compute_stats,
+                      font=config.FONT_BODY, width=130).pack(side="left", padx=(10, 0))
+        ctk.CTkButton(tools, text="📥 写入统计结果", command=self.app.on_write_stats,
+                      font=config.FONT_BODY, width=160, fg_color="gray35",
+                      hover_color="gray45").pack(side="right")
 
         # 导出按钮
         ctk.CTkButton(self, text="💾 导出结果", command=self.app.on_export,
                       font=config.FONT_BODY, height=40).grid(
-            row=2, column=0, sticky="ew", padx=20, pady=(18, 6))
+            row=2, column=0, sticky="ew", padx=20, pady=(12, 6))
 
-        # 导出反馈信息
+        # 统计/导出反馈信息
         self.info_label = ctk.CTkLabel(self, text="", font=config.FONT_BODY,
                                        justify="left", anchor="w", wraplength=660)
         self.info_label.grid(row=3, column=0, sticky="w", padx=20, pady=6)
+
+    # ---- 与控制器交互的 API ----
+
+    def update_columns(self, columns: list) -> None:
+        """刷新候选列：分组列下拉框与条件行列名候选（失效时传空列表）。"""
+        self._columns = [str(c) for c in columns]
+        self.group_combo.configure(values=["（不分组）"] + self._columns)
+        if self.group_combo.get() not in self.group_combo.cget("values"):
+            self.group_combo.set("（不分组）")
+        self.cond_scroll.update_columns(self._columns)
+
+    def get_group_by(self) -> str | None:
+        """当前分组列（「（不分组）」/未选时返回 None）。"""
+        g = self.group_combo.get().strip()
+        return None if g in ("", "（不分组）") else g
+
+    def set_group_by(self, column: str) -> None:
+        """设置分组列（程序化，供测试与复用）。"""
+        self.group_combo.set(column)
+
+    @property
+    def _condition_rows(self) -> list:
+        return self.cond_scroll._condition_rows
+
+    def get_conditions(self) -> list:
+        return self.cond_scroll.get_conditions()
+
+    def set_conditions(self, conditions: list) -> None:
+        self.cond_scroll.set_conditions(conditions)
+
+    def reset_conditions(self) -> None:
+        self.cond_scroll.reset_conditions()
 
     def show_info(self, text: str) -> None:
         self.info_label.configure(text=text)

@@ -581,6 +581,13 @@ def main() -> int:
             row_cols = list(fp5._condition_rows[0]["col_combo"].cget("values"))
             assert "空备注" not in row_cols, "隐藏列不应出现在列名下拉框"
             assert "销售额" in row_cols, "可见列应保留在下拉框"
+            # 统计页下拉框同步：隐藏列不出现
+            app.pages[3].update_columns(fp5.visible_columns())
+            assert "空备注" not in set(app.pages[3].group_combo.cget("values")), \
+                "统计页分组列下拉框不应含隐藏列"
+            assert "空备注" not in set(
+                app.pages[3]._condition_rows[0]["col_combo"].cget("values")), \
+                "统计页条件行列名下拉框不应含隐藏列"
             # 可隐藏列 = 全部列 - 基准表列（基准表列不可隐藏、不进对话框）
             hideable = app._hideable_columns()
             assert "空备注" in hideable and "地区_3" in hideable, "非基准表列应可隐藏"
@@ -626,6 +633,8 @@ def main() -> int:
                 assert "空备注" not in fp5.get_hidden(), "勾选后应取消隐藏"
                 assert "空备注" in list(fp5._condition_rows[0]["col_combo"].cget("values")), \
                     "取消隐藏后列名下拉框应恢复该列"
+                assert "空备注" in set(app.pages[3].group_combo.cget("values")), \
+                    "取消隐藏后统计页分组列下拉框应恢复该列"
                 assert filter_previews and filter_previews[-1][0] == "预览：显示列调整", \
                     "显示列调整后应自动弹出预览"
                 assert len(filter_previews[-1][1]) == 2, "调整预览内容应为当前数据（过滤结果）"
@@ -650,6 +659,44 @@ def main() -> int:
             assert fp5.column_btn.cget("text") == "☑ 显示列", "无隐藏时按钮无计数"
             print("[OK] 隐藏列：预览/导出投影、排除基准表列、调整后自动预览")
 
+            # 5d. 分组统计：分组列 + 条件行 → 计算统计并弹预览
+            sp = app.pages[3]
+            assert set(sp.group_combo.cget("values")) >= {"（不分组）", "地区", "销售额"}, \
+                "统计页分组列下拉框应包含合并结果列"
+            sp.set_group_by("地区")
+            sp.set_conditions([{"column": "销售额", "op": "大于", "value": "1000"}])
+            stats_previews = []
+            app._open_preview = lambda *a, **k: stats_previews.append(a)  # type: ignore[assignment]
+            try:
+                app.on_compute_stats()
+                assert app.state.stats_df is not None, "统计结果应已计算"
+                assert app.state.stats_df["地区"].tolist() == ["华东", "华北"], \
+                    f"按地区分组计数: {app.state.stats_df.to_dict('records')}"
+                assert app.state.stats_df["数量"].tolist() == [1, 1], "只统计符合条件的行"
+                assert stats_previews and stats_previews[0][0] == "预览：统计结果", \
+                    "统计完成后应弹出结果预览"
+                # 不分组 + 无条件 → 当前数据总数量
+                sp.set_group_by("（不分组）")
+                sp.reset_conditions()
+                app.on_compute_stats()
+                assert int(app.state.stats_df.iloc[0, 0]) == 2, "不分组统计总数量（过滤后 2 行）"
+                # 写入统计结果：二级确认 → 内存累积（不写文件），导出时一并写入
+                from tkinter import messagebox
+                orig_ask = messagebox.askyesno
+                messagebox.askyesno = lambda *a, **k: False
+                app.on_write_stats()
+                assert app.state.stats_sheets == [], "确认取消不应累积"
+                messagebox.askyesno = lambda *a, **k: True
+                app.on_write_stats()
+                assert [n for n, _ in app.state.stats_sheets] == ["统计结果"], "首次追加"
+                app.on_write_stats()
+                assert [n for n, _ in app.state.stats_sheets] == ["统计结果", "统计结果_2"], \
+                    "再次点击追加新工作表"
+                messagebox.askyesno = orig_ask
+            finally:
+                app._open_preview = orig_open_preview
+            print("[OK] 分组统计：计算预览/不分组总数/写入统计结果（确认+内存累积）")
+
             # 6. 导出（绕过保存对话框与提示弹窗）
             from tkinter import filedialog, messagebox
             out = os.path.join(tmp, "冒烟测试导出.xlsx")
@@ -660,8 +707,9 @@ def main() -> int:
             app.on_export()
             assert os.path.exists(out), "导出文件应存在"
             sheets = pd.ExcelFile(out).sheet_names
-            assert sheets == ["最终数据", "统计结果"]
-            print(f"[OK] 导出成功，双 Sheet：{sheets}")
+            assert sheets == ["最终数据", "统计结果", "统计结果_2"], \
+                f"导出应含最终数据与累积的统计: {sheets}"
+            print(f"[OK] 导出成功：{sheets}（最终数据 + 累积统计一并写入）")
 
             # 7. 未匹配就过滤 → 提示（验证守卫逻辑不崩溃）
             app.state.merged_df = None
