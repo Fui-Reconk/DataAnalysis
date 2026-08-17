@@ -615,6 +615,14 @@ def main() -> int:
             assert "空备注" not in data_out.columns, "导出应隐藏所选列"
             assert "销售额" in data_out.columns, "导出应保留可见列"
             assert "订单号" in data_out.columns, "基准表列始终保留"
+            # 显示列对话框：按「文件名[表名]」分组、显示名去除 _idx 后缀
+            opts = app._visible_column_options()
+            groups = {g for g, _k, _l in opts}
+            assert all("[" in g for g in groups), f"应按 文件名[表名] 分组: {sorted(groups)}"
+            label_of = {k: l for _g, k, l in opts}
+            assert label_of.get("地区_3") == "地区", "带后缀列应显示去掉后缀的名称"
+            assert label_of.get("空备注") == "空备注", "非重复列显示原名"
+            assert "地区_3" in label_of, "隐藏用的 key 仍是完整列名"
             # 显示列对话框：已隐藏列默认未勾选；勾选恢复显示后自动弹预览
             from app.sheet_dialog import SheetPickerDialog
             orig_columns_preview = config.PREVIEW_AUTO_AFTER_COLUMNS

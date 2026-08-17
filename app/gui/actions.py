@@ -5,6 +5,8 @@
 """
 from __future__ import annotations
 
+import os
+import re
 from tkinter import filedialog, messagebox
 
 import pandas as pd
@@ -136,11 +138,62 @@ class OperationsMixin(AppBase):
         base_cols = self._base_column_names()
         return [c for c in self.pages[2].available_columns() if c not in base_cols]
 
-    def on_choose_visible_columns(self) -> None:
-        """打开「显示列」勾选对话框：勾选 = 显示，未勾选 = 隐藏。
+    def _column_sources(self) -> dict:
+        """合并结果列 → 来源数据源 (文件路径, 工作表名) 的映射。
 
-        基准表列不可隐藏（不在对话框中显示，始终保留）；
-        隐藏列仅影响过滤结果预览与导出（原始合并结果不变）。
+        与 merge_engine 的后缀命名对应：
+          - 列名在某数据源中精确存在 → 归该数据源（按 sources 顺序，首个匹配）；
+          - 否则形如「列名_N」（N≥2）→ 归 sources[N-1]（N 即合并时的
+            数据源序号后缀），且该数据源存在去掉后缀的同名列。
+        """
+        mapping: dict = {}
+        for src in self.state.sources:
+            df = self.state.dataframes.get(src)
+            if df is None:
+                continue
+            for col in df.columns:
+                if str(col) not in mapping:
+                    mapping[str(col)] = src
+        for col in self.pages[2].available_columns():
+            if col in mapping:
+                continue
+            m = re.match(r"^(.*)_(\d+)$", col)
+            if not m:
+                continue
+            stem, idx = m.group(1), int(m.group(2))
+            if 2 <= idx <= len(self.state.sources):
+                src = self.state.sources[idx - 1]
+                df = self.state.dataframes.get(src)
+                if df is not None and stem in df.columns:
+                    mapping[col] = src
+        return mapping
+
+    def _visible_column_options(self) -> list:
+        """「选择显示列」对话框选项：按「文件名[表名]」分组，显示名去掉 _idx 后缀。
+
+        返回 [(分组标题, 列名key, 显示名), ...]，分组标题为来源数据源的
+        「文件名[工作表名]」（参考添加工作表对话框）；显示名取该列在来源
+        表中的原始列名（合并时加的 _2/_3… 后缀只在显示层去掉，数据不变）。
+        """
+        mapping = self._column_sources()
+        options = []
+        for col in self._hideable_columns():
+            src = mapping.get(col) or self.state.sources[0]  # 兜底归基准表
+            df = self.state.dataframes.get(src)
+            display = col
+            if df is not None and col not in df.columns:
+                m = re.match(r"^(.*)_\d+$", col)
+                if m:
+                    display = m.group(1)
+            path, sheet = src
+            options.append((f"{os.path.basename(path)}[{sheet}]", col, display))
+        return options
+
+    def on_choose_visible_columns(self) -> None:
+        """打开「选择显示列」勾选对话框：勾选 = 显示，未勾选 = 隐藏。
+
+        列按来源数据源「文件名[工作表名]」分组显示，显示名去掉合并加的
+        _2/_3… 后缀（数据列名不变）；基准表列不可隐藏（不出现在列表中）。
         """
         columns = self._hideable_columns()
         if not columns:
@@ -149,10 +202,10 @@ class OperationsMixin(AppBase):
         hidden = {c for c in self.pages[2].get_hidden() if c in columns}
         SheetPickerDialog(
             self.root, "选择显示列",
-            [(None, col, col) for col in columns],
+            self._visible_column_options(),
             on_confirm=self._apply_visible_columns,
             checked_keys=hidden,
-            hint_text="勾选要显示的列（未勾选 = 隐藏；基准表列始终显示）：")
+            hint_text="勾选要显示的列（未勾选 = 隐藏；按来源文件分组，列名已去除后缀：")
 
     def _apply_visible_columns(self, keys) -> None:
         """应用显示列选择（keys 为勾选显示的列；取消为 None）。"""
